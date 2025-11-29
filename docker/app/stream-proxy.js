@@ -11,6 +11,10 @@ const vodBuilder = require('./cineby-vod-builder');
 // DirecTV EPG Service
 const directvEpg = require('./directv-epg');
 
+// CinemaOS Database Manager (for auto-refresh)
+const CinemaOSDbManager = require('./cinemaos-db-manager');
+const cinemaosManager = new CinemaOSDbManager();
+
 // Unified Provider System
 const providerRegistry = require('./providers/provider-registry');
 const cacheManager = require('./shared/cache-manager');
@@ -708,6 +712,7 @@ app.get('/vod/:providerId/status', (req, res) => {
 // Stream endpoint for any provider
 app.get('/vod/:providerId/:contentId/stream', async (req, res) => {
   const { providerId, contentId } = req.params;
+  const { title, year, imdbId } = req.query;  // Optional movie info for better API results
 
   const provider = providerRegistry.get(providerId);
   if (!provider) {
@@ -718,12 +723,29 @@ app.get('/vod/:providerId/:contentId/stream', async (req, res) => {
     console.log(`[vod] Stream request: ${providerId}/${contentId}`);
 
     // Get stream URL (from cache or fresh extraction)
-    const streamUrl = await providerRegistry.extractStreamUrl(providerId, contentId);
+    // Pass movie info if provided (helps CinemaOS API)
+    const movieInfo = { title, year, imdbId };
+    const streamResult = await provider.extractStreamUrl(contentId, 'movie', movieInfo);
 
-    // Fetch the m3u8 playlist
+    // Handle both old format (string URL) and new format (object with url + headers)
+    let streamUrl, streamHeaders;
+    if (typeof streamResult === 'string') {
+      streamUrl = streamResult;
+      streamHeaders = provider.getProxyHeaders();
+    } else {
+      streamUrl = streamResult.url;
+      streamHeaders = streamResult.headers || provider.getProxyHeaders();
+    }
+
+    console.log(`[vod] Proxying stream: ${streamUrl.substring(0, 80)}...`);
+
+    // Fetch the m3u8 playlist with proper headers
     const fetch = (await import('node-fetch')).default;
     const response = await fetch(streamUrl, {
-      headers: provider.getProxyHeaders()
+      headers: {
+        ...streamHeaders,
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+      }
     });
 
     if (!response.ok) {
@@ -732,10 +754,16 @@ app.get('/vod/:providerId/:contentId/stream', async (req, res) => {
 
     let playlist = await response.text();
 
+    // Store headers for segment proxying
+    if (streamResult.headers) {
+      provider._streamHeaders = provider._streamHeaders || {};
+      provider._streamHeaders[contentId] = streamHeaders;
+    }
+
     // Rewrite segment URLs if needed
     const host = req.headers.host || `${config.host}:${config.port}`;
     const proxyBase = `http://${host}/vod/${providerId}`;
-    playlist = provider.rewritePlaylistUrls(playlist, proxyBase);
+    playlist = provider.rewritePlaylistUrls(playlist, proxyBase, contentId, streamUrl);
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.send(playlist);
@@ -749,6 +777,7 @@ app.get('/vod/:providerId/:contentId/stream', async (req, res) => {
 // Segment proxy for any provider
 app.get('/vod/:providerId/segment/:encodedUrl', async (req, res) => {
   const { providerId, encodedUrl } = req.params;
+  const { cid } = req.query;  // Content ID for getting correct headers
 
   const provider = providerRegistry.get(providerId);
   if (!provider) {
@@ -758,9 +787,18 @@ app.get('/vod/:providerId/segment/:encodedUrl', async (req, res) => {
   try {
     const segmentUrl = Buffer.from(encodedUrl, 'base64url').toString('utf8');
 
+    // Get headers - use stored headers if available, otherwise default
+    let headers = provider.getProxyHeaders();
+    if (cid && provider._streamHeaders && provider._streamHeaders[cid]) {
+      headers = provider._streamHeaders[cid];
+    }
+
     const fetch = (await import('node-fetch')).default;
     const response = await fetch(segmentUrl, {
-      headers: provider.getProxyHeaders()
+      headers: {
+        ...headers,
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+      }
     });
 
     if (!response.ok) {
@@ -776,6 +814,166 @@ app.get('/vod/:providerId/segment/:encodedUrl', async (req, res) => {
   } catch (error) {
     console.error(`[vod] Segment proxy error:`, error.message);
     res.status(500).send('Proxy error');
+  }
+});
+
+// CinemaOS Movie Playlist (from TMDB database)
+app.get('/cinemaos/playlist.m3u', (req, res) => {
+  const m3uPath = path.join(__dirname, 'data', 'cinemaos-movies.m3u');
+
+  if (!fs.existsSync(m3uPath)) {
+    return res.status(404).send('Playlist not generated yet. POST to /cinemaos/generate-playlist first.');
+  }
+
+  res.setHeader('Content-Type', 'application/x-mpegurl');
+  res.setHeader('Content-Disposition', 'attachment; filename="cinemaos-movies.m3u"');
+  res.sendFile(m3uPath);
+});
+
+// Generate CinemaOS playlist from database
+app.post('/cinemaos/generate-playlist', async (req, res) => {
+  try {
+    const { maxMovies, minVotes, minRating, sortBy } = req.query;
+    const host = req.headers.host || `${config.host}:${config.port}`;
+
+    // Use new database manager
+    process.env.TUNER_HOST = host;
+    process.env.DATA_DIR = path.join(__dirname, 'data');
+
+    delete require.cache[require.resolve('./cinemaos-db-manager')];
+    const CinemaOSDbManager = require('./cinemaos-db-manager');
+    const manager = new CinemaOSDbManager();
+    manager.loadDatabase();
+
+    const result = manager.generateM3U({
+      maxMovies: maxMovies ? parseInt(maxMovies) : 0,
+      minVotes: minVotes ? parseInt(minVotes) : 0,
+      minRating: minRating ? parseFloat(minRating) : 0,
+      sortBy: sortBy || 'popularity'
+    });
+
+    res.json({
+      success: true,
+      totalMovies: result.totalMovies,
+      playlistUrl: `http://${host}/cinemaos/playlist.m3u`,
+      fileSize: `${(result.fileSize / 1024).toFixed(1)} KB`
+    });
+
+  } catch (error) {
+    console.error('[cinemaos] Playlist generation error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// CinemaOS database stats
+app.get('/cinemaos/stats', (req, res) => {
+  try {
+    // Use global manager which has auto-refresh state
+    if (cinemaosManager.movies.size === 0) {
+      cinemaosManager.loadDatabase();
+    }
+    res.json(cinemaosManager.getStats());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// CinemaOS auto-refresh status
+app.get('/cinemaos/auto-refresh/status', (req, res) => {
+  res.json(cinemaosManager.getAutoRefreshStatus());
+});
+
+// Stop CinemaOS auto-refresh
+app.post('/cinemaos/auto-refresh/stop', (req, res) => {
+  cinemaosManager.stopAutoRefresh();
+  res.json({ success: true, message: 'Auto-refresh stopped' });
+});
+
+// Start/restart CinemaOS auto-refresh
+app.post('/cinemaos/auto-refresh/start', (req, res) => {
+  const { hours } = req.query;
+  const intervalHours = hours ? parseInt(hours) : 6;
+
+  // Stop existing if running
+  cinemaosManager.stopAutoRefresh();
+
+  // Start with new interval
+  cinemaosManager.startAutoRefresh(intervalHours);
+
+  res.json({
+    success: true,
+    message: `Auto-refresh started (every ${intervalHours} hours)`,
+    status: cinemaosManager.getAutoRefreshStatus()
+  });
+});
+
+// CinemaOS full database fetch (takes 30-60 min)
+app.post('/cinemaos/fetch-full', async (req, res) => {
+  try {
+    const host = req.headers.host || `${config.host}:${config.port}`;
+    process.env.TUNER_HOST = host;
+    process.env.DATA_DIR = path.join(__dirname, 'data');
+
+    delete require.cache[require.resolve('./cinemaos-db-manager')];
+    const CinemaOSDbManager = require('./cinemaos-db-manager');
+    const manager = new CinemaOSDbManager();
+
+    console.log('[cinemaos] Starting full database fetch (this will take 30-60 minutes)...');
+
+    // Run in background
+    manager.fullFetch().then(() => {
+      manager.generateM3U();
+      console.log('[cinemaos] Full fetch complete, playlist regenerated');
+    }).catch(err => {
+      console.error('[cinemaos] Full fetch error:', err.message);
+    });
+
+    res.json({
+      success: true,
+      message: 'Full database fetch started in background. This will take 30-60 minutes.',
+      checkStatus: `http://${host}/cinemaos/stats`
+    });
+
+  } catch (error) {
+    console.error('[cinemaos] Fetch error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// CinemaOS incremental update (only new movies)
+app.post('/cinemaos/update', async (req, res) => {
+  try {
+    const host = req.headers.host || `${config.host}:${config.port}`;
+    process.env.TUNER_HOST = host;
+    process.env.DATA_DIR = path.join(__dirname, 'data');
+
+    delete require.cache[require.resolve('./cinemaos-db-manager')];
+    const CinemaOSDbManager = require('./cinemaos-db-manager');
+    const manager = new CinemaOSDbManager();
+
+    console.log('[cinemaos] Starting incremental update...');
+
+    // Run in background
+    manager.incrementalUpdate().then((stats) => {
+      if (stats.new > 0) {
+        manager.generateM3U();
+        console.log(`[cinemaos] Update complete: ${stats.new} new movies added`);
+      } else {
+        console.log('[cinemaos] Update complete: no new movies found');
+      }
+    }).catch(err => {
+      console.error('[cinemaos] Update error:', err.message);
+    });
+
+    res.json({
+      success: true,
+      message: 'Incremental update started in background.',
+      checkStatus: `http://${host}/cinemaos/stats`
+    });
+
+  } catch (error) {
+    console.error('[cinemaos] Update error:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -970,11 +1168,22 @@ async function start() {
     console.log(`  Update Catalog:   POST http://<host>:${config.port}/vod/update-catalog`);
     console.log(`  Batch Extract:    POST http://<host>:${config.port}/vod/extract`);
     console.log('');
+    console.log('CinemaOS Movies (23,000+ movies with auto-refresh):');
+    console.log(`  M3U Playlist:     http://<host>:${config.port}/cinemaos/playlist.m3u`);
+    console.log(`  Database Stats:   http://<host>:${config.port}/cinemaos/stats`);
+    console.log(`  Auto-refresh:     http://<host>:${config.port}/cinemaos/auto-refresh/status`);
+    console.log('');
     console.log('Add the M3U URL to TvMate or VLC to start watching!');
     console.log('='.repeat(60));
 
     // Start EPG auto-refresh (every 4 hours)
     directvEpg.startAutoRefresh();
+
+    // Start CinemaOS movie database auto-refresh (every 6 hours)
+    process.env.DATA_DIR = path.join(__dirname, 'data');
+    process.env.TUNER_HOST = `${config.host}:${config.port}`;
+    cinemaosManager.loadDatabase();
+    cinemaosManager.startAutoRefresh(6);
   });
 }
 

@@ -64,12 +64,50 @@ class BaseProvider {
    * Rewrite playlist URLs to route through our proxy
    * @param {string} playlist - Original m3u8 playlist content
    * @param {string} proxyBase - Base URL for proxy (e.g., http://host:port/vod/cineby)
+   * @param {string} contentId - Content ID for header lookup
+   * @param {string} baseStreamUrl - Base URL of the original stream (for resolving relative paths)
    * @returns {string} - Modified playlist
    */
-  rewritePlaylistUrls(playlist, proxyBase) {
-    // Default: no rewriting needed
-    // Override in provider if segment URLs need proxying
-    return playlist;
+  rewritePlaylistUrls(playlist, proxyBase, contentId = null, baseStreamUrl = null) {
+    // Default: rewrite all URLs to go through our segment proxy
+    const lines = playlist.split('\n');
+    const rewritten = lines.map(line => {
+      const trimmed = line.trim();
+
+      // Skip comment lines and empty lines
+      if (trimmed.startsWith('#') || trimmed === '') {
+        return line;
+      }
+
+      let fullUrl = trimmed;
+
+      // If it's a relative path, make it absolute
+      if (trimmed.startsWith('/') && baseStreamUrl) {
+        // Extract origin from baseStreamUrl
+        try {
+          const urlObj = new URL(baseStreamUrl);
+          fullUrl = `${urlObj.origin}${trimmed}`;
+        } catch (e) {
+          // If can't parse, try prepending https
+          fullUrl = `https:/${trimmed}`;
+        }
+      } else if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+        // Relative path without leading slash - resolve relative to stream URL
+        if (baseStreamUrl) {
+          const lastSlash = baseStreamUrl.lastIndexOf('/');
+          fullUrl = baseStreamUrl.substring(0, lastSlash + 1) + trimmed;
+        } else {
+          return line; // Can't resolve, leave as-is
+        }
+      }
+
+      // Encode and proxy the full URL
+      const encoded = Buffer.from(fullUrl).toString('base64url');
+      const cidParam = contentId ? `?cid=${contentId}` : '';
+      return `${proxyBase}/segment/${encoded}${cidParam}`;
+    });
+
+    return rewritten.join('\n');
   }
 
   /**

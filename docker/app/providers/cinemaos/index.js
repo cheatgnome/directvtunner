@@ -1,9 +1,11 @@
 // CinemaOS Provider - Main implementation
 // Extends BaseProvider with CinemaOS-specific logic
+// Uses direct /api/fuckit/scraper endpoint for stream extraction
 
 const BaseProvider = require('../base-provider');
 const { normalizeMovie } = require('../../shared/tmdb-utils');
 const config = require('./config');
+const https = require('https');
 
 class CinemaOSProvider extends BaseProvider {
   constructor() {
@@ -389,9 +391,71 @@ class CinemaOSProvider extends BaseProvider {
   }
 
   /**
-   * Extract m3u8 stream URL for a movie
+   * Decode double base64-encoded stream URL from CinemaOS API
    */
-  async extractStreamUrl(contentId, contentType = 'movie') {
+  decodeStreamUrl(encodedUrl) {
+    try {
+      // Extract base64 from the worker URL
+      // Format: https://flowersaint.kamasutrame.workers.dev/m/{BASE64}
+      if (!encodedUrl.includes('/m/')) {
+        return null;
+      }
+
+      const base64Part = encodedUrl.split('/m/').pop();
+
+      // First decode
+      const firstDecode = Buffer.from(base64Part, 'base64').toString('utf-8');
+
+      // Second decode
+      const secondDecode = Buffer.from(firstDecode, 'base64').toString('utf-8');
+
+      // Parse JSON
+      const urlData = JSON.parse(secondDecode);
+
+      return urlData;
+    } catch (e) {
+      this.logError('Error decoding stream URL:', e.message);
+      return null;
+    }
+  }
+
+  /**
+   * Make HTTPS request to CinemaOS API
+   */
+  async fetchFromScraperApi(params) {
+    return new Promise((resolve, reject) => {
+      const queryString = new URLSearchParams(params).toString();
+      const url = `${this.baseUrl}${config.api.scraper}?${queryString}`;
+
+      this.log(`Calling scraper API: ${url.substring(0, 100)}...`);
+
+      const options = {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+          'Referer': `${this.baseUrl}/`,
+          'Accept': '*/*'
+        },
+        rejectUnauthorized: false
+      };
+
+      https.get(url, options, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            reject(new Error(`Failed to parse API response: ${e.message}`));
+          }
+        });
+      }).on('error', reject);
+    });
+  }
+
+  /**
+   * Extract m3u8 stream URL for a movie using direct API
+   */
+  async extractStreamUrl(contentId, contentType = 'movie', movieInfo = {}) {
     // Check in-memory cache
     const cached = this.getCachedStreamUrl(contentId);
     if (cached) {
@@ -399,147 +463,161 @@ class CinemaOSProvider extends BaseProvider {
       return cached;
     }
 
+    this.log(`Extracting stream for ${contentType}/${contentId} via direct API`);
+
+    try {
+      // Build API params
+      const params = {
+        sr: movieInfo.serverId || config.defaultServerId,
+        title: movieInfo.title || '',
+        mediaType: contentType,
+        year: movieInfo.year || new Date().getFullYear(),
+        tmdbId: contentId,
+        imdbId: movieInfo.imdbId || '',
+        totalSeasons: 1,
+        titlePortuguese: movieInfo.title || '',
+        titleSpanish: movieInfo.title || ''
+      };
+
+      // Call the scraper API
+      const apiData = await this.fetchFromScraperApi(params);
+
+      if (!apiData.success) {
+        throw new Error('API returned failure');
+      }
+
+      const decryptedData = apiData.decryptedData || {};
+
+      // Try to get quality-specific URLs first
+      if (decryptedData.quality && decryptedData.quality.length > 0) {
+        // Get best quality (first in list, usually 1080p)
+        const bestQuality = decryptedData.quality[0];
+        const decoded = this.decodeStreamUrl(bestQuality.url);
+
+        if (decoded && decoded.url) {
+          this.log(`Got ${bestQuality.quality} stream: ${decoded.url.substring(0, 80)}...`);
+
+          // Return object with URL and headers needed
+          const streamInfo = {
+            url: decoded.url,
+            headers: {
+              'Referer': decoded.referer || 'https://cineby.app/',
+              'Origin': decoded.origin || 'https://cineby.app'
+            },
+            quality: bestQuality.quality,
+            allQualities: decryptedData.quality.map(q => ({
+              quality: q.quality,
+              ...this.decodeStreamUrl(q.url)
+            })).filter(q => q.url),
+            subtitles: decryptedData.tracks || []
+          };
+
+          // Cache the result
+          this.cacheStreamUrl(contentId, streamInfo);
+
+          return streamInfo;
+        }
+      }
+
+      // Fallback to main URL if no quality options
+      if (decryptedData.url) {
+        const decoded = this.decodeStreamUrl(decryptedData.url);
+        if (decoded && decoded.url) {
+          this.log(`Got main stream: ${decoded.url.substring(0, 80)}...`);
+
+          const streamInfo = {
+            url: decoded.url,
+            headers: {
+              'Referer': decoded.referer || 'https://cineby.app/',
+              'Origin': decoded.origin || 'https://cineby.app'
+            },
+            subtitles: decryptedData.tracks || []
+          };
+
+          this.cacheStreamUrl(contentId, streamInfo);
+          return streamInfo;
+        }
+      }
+
+      throw new Error('No valid stream URL found in API response');
+
+    } catch (error) {
+      this.logError(`Stream extraction failed for ${contentId}:`, error.message);
+
+      // Fallback to browser-based extraction if API fails
+      this.log('Falling back to browser-based extraction...');
+      return this.extractStreamUrlViaBrowser(contentId, contentType);
+    }
+  }
+
+  /**
+   * Browser-based stream extraction (fallback method)
+   */
+  async extractStreamUrlViaBrowser(contentId, contentType = 'movie') {
     let browser;
     let page;
     let createdPage = false;
-    const allRequests = [];  // Declare here for access in catch block
+    const allRequests = [];
 
     try {
       browser = await this.connectBrowser();
       const contexts = browser.contexts();
       const context = contexts[0];
 
-      this.log(`Extracting stream for ${contentType}/${contentId}`);
+      this.log(`[Fallback] Extracting stream for ${contentType}/${contentId} via browser`);
 
-      // Try to reuse existing CinemaOS page on the same movie
       const contentUrl = `${this.baseUrl}/${contentType}/${contentId}`;
       const existingPages = context.pages();
       page = existingPages.find(p => p.url().includes(`cinemaos.live/${contentType}/${contentId}`));
 
-      if (page) {
-        this.log(`Reusing existing page: ${page.url()}`);
-      } else {
-        // Try to reuse any CinemaOS page and navigate
+      if (!page) {
         page = existingPages.find(p => p.url().includes('cinemaos.live'));
-        if (page) {
-          this.log(`Reusing CinemaOS page, navigating to ${contentId}`);
-        } else {
+        if (!page) {
           page = await context.newPage();
           createdPage = true;
-          this.log('Created new page');
         }
       }
 
-      // Enable ad-blocking BEFORE any navigation
       const getBlockedCount = await this.enableAdBlocking(page);
 
-      // Monitor ALL network requests for debugging
-      // Note: 'allRequests' and 'context' are already defined above
-
-      // Log all requests from context (includes iframes)
       context.on('request', (request) => {
-        const url = request.url();
-        allRequests.push(url);
-        // Log video-related requests
-        if (url.includes('.m3u8') || url.includes('.ts') || url.includes('video') ||
-            url.includes('stream') || url.includes('play') || url.includes('embed')) {
-          this.log(`[DEBUG] Request: ${url.substring(0, 100)}`);
-        }
+        allRequests.push(request.url());
       });
 
-      // Also monitor page for iframes
-      page.on('frameattached', (frame) => {
-        this.log(`[DEBUG] Frame attached: ${frame.url()}`);
-      });
-
-      page.on('framenavigated', (frame) => {
-        if (frame !== page.mainFrame()) {
-          this.log(`[DEBUG] Frame navigated: ${frame.url()}`);
-        }
-      });
-
-      // Set up network interception BEFORE navigation/click
       const m3u8Promise = this.interceptM3u8(page, config.timeouts.m3u8Capture);
 
-      // Navigate if not already on the content page
       if (!page.url().includes(`/${contentType}/${contentId}`)) {
         await page.goto(contentUrl, {
           waitUntil: 'domcontentloaded',
           timeout: config.timeouts.navigation
         });
-        // Wait a bit for the page to settle
         await this.sleep(2000);
       }
 
-      // Try to close any ad overlays
       await this.closeAdOverlays(page);
 
-      // Try to click watch/play button - with retry after closing ads
-      let buttonClicked = false;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        for (const selector of config.playButtonSelectors) {
-          try {
-            const button = page.locator(selector).first();
-            if (await button.isVisible({ timeout: config.timeouts.playButton })) {
-              this.log(`Clicking: ${selector}`);
-              await button.click();
-              buttonClicked = true;
-              break;
-            }
-          } catch (e) {
-            // Button not found, try next
+      for (const selector of config.playButtonSelectors) {
+        try {
+          const button = page.locator(selector).first();
+          if (await button.isVisible({ timeout: 2000 })) {
+            await button.click();
+            break;
           }
-        }
-
-        if (buttonClicked) break;
-
-        // If button not clicked, try closing ads again and retry
-        if (attempt < 2) {
-          this.log(`Play button not found, attempt ${attempt + 1}, closing ads...`);
-          await this.closeAdOverlays(page);
-          await this.sleep(1000);
-        }
+        } catch (e) {}
       }
 
-      if (!buttonClicked) {
-        this.log('No play button found, waiting for auto-play or iframe');
-      }
-
-      // Wait for m3u8 URL
       const m3u8Url = await m3u8Promise;
-      this.log(`Stream captured: ${m3u8Url.substring(0, 80)}...`);
+      this.log(`[Fallback] Stream captured: ${m3u8Url.substring(0, 80)}...`);
 
-      // Log stats
-      const blockedCount = getBlockedCount();
-      this.log(`Blocked ${blockedCount} ad requests`);
-      this.log(`Total requests observed: ${allRequests.length}`);
-
-      // Cache the URL
       this.cacheStreamUrl(contentId, m3u8Url);
-
       return m3u8Url;
 
     } catch (error) {
-      this.logError(`Stream extraction failed for ${contentId}:`, error.message);
-      // Dump debug info on failure
-      if (allRequests && allRequests.length > 0) {
-        this.log(`[DEBUG] Total requests made: ${allRequests.length}`);
-        // Log last 20 requests
-        const last20 = allRequests.slice(-20);
-        this.log(`[DEBUG] Last ${last20.length} requests:`);
-        last20.forEach((url, i) => {
-          this.log(`[DEBUG]   ${i + 1}. ${url.substring(0, 120)}`);
-        });
-      }
+      this.logError(`[Fallback] Browser extraction failed:`, error.message);
       throw error;
     } finally {
-      // Only close if we created a new page
       if (createdPage && page) {
-        try {
-          await page.close();
-        } catch (e) {
-          // Page might already be closed
-        }
+        try { await page.close(); } catch (e) {}
       }
     }
   }

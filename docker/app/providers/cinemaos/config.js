@@ -9,11 +9,20 @@ module.exports = {
   // API endpoints
   api: {
     tmdb: '/api/tmdb',
-    // These may be used for stream resolution
-    fuckit: '/api/fuckit',
+    scraper: '/api/fuckit/scraper',  // Direct stream URL API
     neoResources: '/api/neo/resources',
     videoplatform: '/api/videoplatform/'
   },
+
+  // Stream servers available from the scraper API
+  streamServers: [
+    { id: 1, name: 'Thunderbolt', note: 'Fast', type: 'primary' },
+    { id: 2, name: 'Storm', note: 'Reliable', type: 'primary' },
+    { id: 3, name: 'Hurricane', note: 'Backup', type: 'backup' }
+  ],
+
+  // Default server ID for stream extraction
+  defaultServerId: 1,
 
   // M3U8 URL patterns - need browser exploration to discover
   // Starting with generic patterns
