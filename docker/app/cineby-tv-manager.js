@@ -381,7 +381,9 @@ class CinebyTVManager {
       );
 
       // Stream URL - default to S01E01
-      const streamUrl = `http://${CONFIG.tunerHost}/vod/cinemaos/${show.id}/stream` +
+      // Read TUNER_HOST at runtime, not from static CONFIG
+      const tunerHost = process.env.TUNER_HOST || CONFIG.tunerHost;
+      const streamUrl = `http://${tunerHost}/vod/cinemaos/${show.id}/stream` +
         `?mediaType=tv` +
         `&title=${encodeURIComponent(show.name || '')}` +
         `&year=${show.year || ''}` +

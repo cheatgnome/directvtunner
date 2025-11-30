@@ -811,7 +811,13 @@ app.get('/vod/:providerId/segment/:encodedUrl', async (req, res) => {
       return res.status(response.status).send('Upstream error');
     }
 
-    res.setHeader('Content-Type', response.headers.get('content-type') || 'video/mp2t');
+    // Always use video/mp2t for segments - upstream may disguise as image/jpg
+    const upstreamType = response.headers.get('content-type') || '';
+    const isVideoSegment = segmentUrl.includes('.ts') || segmentUrl.includes('.m4s') ||
+                           segmentUrl.includes('seg-') || segmentUrl.includes('/file') ||
+                           upstreamType.includes('image/') || // Disguised video
+                           !upstreamType.includes('mpegurl'); // Not a playlist
+    res.setHeader('Content-Type', isVideoSegment ? 'video/mp2t' : upstreamType);
     res.setHeader('Cache-Control', 'public, max-age=3600');
 
     const buffer = await response.buffer();
@@ -825,15 +831,31 @@ app.get('/vod/:providerId/segment/:encodedUrl', async (req, res) => {
 
 // CinemaOS Movie Playlist (from TMDB database)
 app.get('/cinemaos/playlist.m3u', (req, res) => {
-  const m3uPath = path.join(__dirname, 'data', 'cinemaos-movies.m3u');
+  try {
+    // Load database if needed
+    if (cinemaosManager.movies.size === 0) {
+      cinemaosManager.loadDatabase();
+    }
 
-  if (!fs.existsSync(m3uPath)) {
-    return res.status(404).send('Playlist not generated yet. POST to /cinemaos/generate-playlist first.');
+    if (cinemaosManager.movies.size === 0) {
+      return res.status(404).send('Playlist not generated yet. POST to /cinemaos/fetch-full first.');
+    }
+
+    // Get host from request to generate correct URLs
+    const host = req.headers.host || `${config.host}:${config.port}`;
+    process.env.TUNER_HOST = host;
+
+    // Regenerate playlist with correct host
+    cinemaosManager.generateM3U();
+
+    const m3uPath = path.join(__dirname, 'data', 'cinemaos-movies.m3u');
+    res.setHeader('Content-Type', 'application/x-mpegurl');
+    res.setHeader('Content-Disposition', 'attachment; filename="cinemaos-movies.m3u"');
+    res.sendFile(m3uPath);
+  } catch (error) {
+    console.error('[cinemaos] Playlist error:', error.message);
+    res.status(500).send('Error generating playlist');
   }
-
-  res.setHeader('Content-Type', 'application/x-mpegurl');
-  res.setHeader('Content-Disposition', 'attachment; filename="cinemaos-movies.m3u"');
-  res.sendFile(m3uPath);
 });
 
 // Generate CinemaOS playlist from database
@@ -987,15 +1009,31 @@ app.post('/cinemaos/update', async (req, res) => {
 
 // TV Shows M3U Playlist
 app.get('/tv/playlist.m3u', (req, res) => {
-  const m3uPath = path.join(__dirname, 'data', 'cineby-tv.m3u');
+  try {
+    // Load database if needed
+    if (tvManager.shows.size === 0) {
+      tvManager.loadDatabase();
+    }
 
-  if (!fs.existsSync(m3uPath)) {
-    return res.status(404).send('TV playlist not generated yet. POST to /tv/fetch-full first.');
+    if (tvManager.shows.size === 0) {
+      return res.status(404).send('TV playlist not generated yet. POST to /tv/fetch-full first.');
+    }
+
+    // Get host from request to generate correct URLs
+    const host = req.headers.host || `${config.host}:${config.port}`;
+    process.env.TUNER_HOST = host;
+
+    // Regenerate playlist with correct host
+    tvManager.generateM3U();
+
+    const m3uPath = path.join(__dirname, 'data', 'cineby-tv.m3u');
+    res.setHeader('Content-Type', 'application/x-mpegurl');
+    res.setHeader('Content-Disposition', 'attachment; filename="cineby-tv.m3u"');
+    res.sendFile(m3uPath);
+  } catch (error) {
+    console.error('[tv] Playlist error:', error.message);
+    res.status(500).send('Error generating playlist');
   }
-
-  res.setHeader('Content-Type', 'application/x-mpegurl');
-  res.setHeader('Content-Disposition', 'attachment; filename="cineby-tv.m3u"');
-  res.sendFile(m3uPath);
 });
 
 // TV database stats

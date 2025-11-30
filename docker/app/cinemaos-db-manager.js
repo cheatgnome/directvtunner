@@ -334,7 +334,9 @@ class CinemaOSDbManager {
         `tvg-rating="${movie.rating || ''}",${displayTitle}`
       );
 
-      const streamUrl = `http://${CONFIG.tunerHost}/vod/cinemaos/${movie.id}/stream` +
+      // Read TUNER_HOST at runtime, not from static CONFIG
+      const tunerHost = process.env.TUNER_HOST || CONFIG.tunerHost;
+      const streamUrl = `http://${tunerHost}/vod/cinemaos/${movie.id}/stream` +
         `?title=${encodeURIComponent(movie.title || '')}` +
         `&year=${movie.year || ''}`;
 
