@@ -39,8 +39,23 @@ A Docker-based IPTV proxy that turns DirecTV Stream into an M3U playlist compati
 ## Docker Hub
 
 ```bash
+# CPU-only (default)
 docker pull sunnyside1/directvtuner:latest
+
+# NVIDIA GPU accelerated
+docker pull sunnyside1/directvtuner:nvidia
+
+# Intel QSV accelerated (coming soon)
+docker pull sunnyside1/directvtuner:intel
 ```
+
+### Image Tags
+
+| Tag | Description | Hardware |
+|-----|-------------|----------|
+| `latest` | CPU-only encoding (libx264) | Any |
+| `nvidia` | NVIDIA NVENC hardware encoding | NVIDIA GPU (GTX 600+) |
+| `intel` | Intel QuickSync encoding (coming soon) | Intel CPU with iGPU |
 
 ---
 
@@ -161,6 +176,99 @@ networks:
 - noVNC: `http://192.168.1.92:6080`
 
 **Note:** With macvlan, the container has its own IP but cannot communicate with the Docker host directly. Use a macvlan shim interface if you need host-to-container communication.
+
+---
+
+## GPU Acceleration (NVIDIA)
+
+For significantly better performance and lower CPU usage, use the NVIDIA GPU-accelerated image.
+
+### Requirements
+
+1. **NVIDIA GPU** with NVENC support (GTX 600 series or newer)
+2. **NVIDIA drivers** installed on the host
+3. **nvidia-container-toolkit** installed
+
+### Install nvidia-container-toolkit
+
+```bash
+# Ubuntu/Debian
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+  sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+sudo apt-get update
+sudo apt-get install -y nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+```
+
+### Docker Compose with NVIDIA GPU
+
+```yaml
+version: '3.8'
+services:
+  dvr-tuner-nvidia:
+    image: sunnyside1/directvtuner:nvidia
+    container_name: dvr-tuner-nvidia
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=video,compute,utility
+    ports:
+      - "7070:7070"
+      - "6080:6080"
+      - "5900:5900"
+      - "9222:9222"
+    volumes:
+      - ./chrome-profile:/data/chrome-profile
+      - ./streams:/data/streams
+    restart: unless-stopped
+```
+
+### Docker Run with NVIDIA GPU
+
+```bash
+docker run -d \
+  --name dvr-tuner-nvidia \
+  --runtime=nvidia \
+  -e NVIDIA_VISIBLE_DEVICES=all \
+  -e NVIDIA_DRIVER_CAPABILITIES=video,compute,utility \
+  -p 7070:7070 \
+  -p 6080:6080 \
+  -p 9222:9222 \
+  -v ./chrome-profile:/data/chrome-profile \
+  sunnyside1/directvtuner:nvidia
+```
+
+### NVENC Settings (Environment Variables)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DVR_NVENC_PRESET` | `p4` | Encoding preset: p1 (fastest) to p7 (best quality) |
+| `DVR_NVENC_TUNE` | `ll` | Tuning: `ll` (low latency), `ull` (ultra low latency), `hq` (high quality) |
+| `DVR_NVENC_RC` | `vbr` | Rate control: `vbr`, `cbr`, `cq` |
+| `DVR_NVENC_BFRAMES` | `0` | B-frames (0 for lowest latency) |
+
+### GPU Monitoring
+
+The web GUI (Status tab) shows real-time GPU stats:
+- GPU Name & Driver Version
+- GPU Utilization %
+- Encoder Utilization %
+- VRAM Usage
+- Temperature
+- Power Draw
+- Active Encoder Sessions
+
+### Performance Comparison
+
+| Metric | CPU (libx264) | GPU (NVENC) |
+|--------|---------------|-------------|
+| CPU Usage | 80-100% | 5-15% |
+| Encoding Speed | ~1x realtime | ~5-10x realtime |
+| Latency | Higher | Lower |
+| Quality at bitrate | Slightly better | Good |
 
 ---
 

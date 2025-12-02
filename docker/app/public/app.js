@@ -96,15 +96,31 @@ function settingsApp() {
       uptimeFormatted: ''
     },
 
+    // GPU status
+    gpuStatus: {
+      available: false,
+      type: 'none',
+      hwAccelEnabled: false,
+      hwAccelType: 'none',
+      encoder: 'libx264',
+      nvidia: null,
+      intel: null,
+      nvencSettings: null
+    },
+    gpuInterval: null,
+
     async init() {
       await this.loadVersion();
       await this.loadStatus();
+      await this.loadGpuStatus();
       await this.loadSettings();
       await this.loadPresets();
       // Refresh version/uptime every 60 seconds
       setInterval(() => this.loadVersion(), 60000);
       // Poll status every 10 seconds
       this.startStatusPolling();
+      // Poll GPU status every 5 seconds
+      this.startGpuPolling();
     },
 
     async loadVersion() {
@@ -381,6 +397,43 @@ function settingsApp() {
         }
       } catch (err) {
         console.error('Failed to load status:', err);
+      }
+    },
+
+    // GPU status functionality
+    async loadGpuStatus() {
+      try {
+        const res = await fetch('/api/gpu/status');
+        if (res.ok) {
+          const data = await res.json();
+          this.gpuStatus = {
+            available: data.available || false,
+            type: data.type || 'none',
+            hwAccelEnabled: data.hwAccelEnabled || false,
+            hwAccelType: data.hwAccelType || 'none',
+            encoder: data.encoder || 'libx264',
+            nvidia: data.nvidia || null,
+            intel: data.intel || null,
+            nvencSettings: data.nvencSettings || null,
+            qsvSettings: data.qsvSettings || null
+          };
+        }
+      } catch (err) {
+        console.error('Failed to load GPU status:', err);
+      }
+    },
+
+    startGpuPolling() {
+      // Only poll if GPU is available
+      if (this.gpuStatus.available) {
+        this.gpuInterval = setInterval(() => this.loadGpuStatus(), 5000);
+      }
+    },
+
+    stopGpuPolling() {
+      if (this.gpuInterval) {
+        clearInterval(this.gpuInterval);
+        this.gpuInterval = null;
       }
     },
 

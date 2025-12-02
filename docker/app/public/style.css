@@ -855,3 +855,146 @@ header .subtitle {
     height: 300px;
   }
 }
+
+/* GPU Status Styles */
+.gpu-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.gpu-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #4ade80;
+}
+
+.gpu-icon {
+  font-size: 1.3rem;
+}
+
+.gpu-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.gpu-stat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.gpu-stat label {
+  min-width: 70px;
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.gpu-stat .stat-value {
+  min-width: 60px;
+  text-align: right;
+  font-size: 0.85rem;
+  color: #ccc;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 8px;
+  background: #252540;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4ade80, #22c55e);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-fill.encoder {
+  background: linear-gradient(90deg, #60a5fa, #3b82f6);
+}
+
+.progress-fill.memory {
+  background: linear-gradient(90deg, #fbbf24, #f59e0b);
+}
+
+.gpu-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  padding-top: 8px;
+  border-top: 1px solid #333;
+}
+
+.gpu-detail {
+  display: flex;
+  gap: 5px;
+  font-size: 0.85rem;
+}
+
+.detail-label {
+  color: #888;
+}
+
+.detail-value {
+  color: #ccc;
+  font-weight: 500;
+}
+
+.detail-value.hot {
+  color: #ef4444;
+}
+
+.gpu-encoder-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px;
+  background: #1a1a2e;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.encoder-label {
+  color: #60a5fa;
+  font-weight: 600;
+}
+
+.encoder-setting {
+  color: #888;
+}
+
+.encoder-setting strong {
+  color: #ccc;
+}
+
+.gpu-cpu-mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #9ca3af;
+  font-size: 0.95rem;
+}
+
+.cpu-icon {
+  font-size: 1.2rem;
+}
+
+.gpu-hint {
+  color: #6b7280;
+  font-size: 0.85rem;
+  margin-top: 5px;
+}
+
+.gpu-hint code {
+  background: #252540;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #60a5fa;
+}

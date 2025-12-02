@@ -37,6 +37,26 @@ module.exports = {
   hlsSegmentTime: 2,
   hlsListSize: 5,
 
+  // Hardware acceleration settings
+  // DVR_HW_ACCEL: 'none' | 'nvenc' | 'qsv' (auto-detected from env)
+  hwAccel: process.env.DVR_HW_ACCEL || 'none',
+
+  // NVENC-specific settings
+  nvenc: {
+    preset: process.env.DVR_NVENC_PRESET || 'p4',  // p1 (fastest) to p7 (best quality)
+    tune: process.env.DVR_NVENC_TUNE || 'll',      // ll (low latency), ull (ultra low latency), hq (high quality)
+    rc: process.env.DVR_NVENC_RC || 'vbr',         // vbr, cbr, cq
+    // Lookahead can improve quality but adds latency
+    lookahead: parseInt(process.env.DVR_NVENC_LOOKAHEAD) || 0,
+    // B-frames (0 for lowest latency)
+    bframes: parseInt(process.env.DVR_NVENC_BFRAMES) || 0,
+  },
+
+  // QSV-specific settings (for Intel, future use)
+  qsv: {
+    preset: process.env.DVR_QSV_PRESET || 'fast',
+  },
+
   // Platform-specific FFmpeg settings
   ffmpeg: {
     // macOS: Use avfoundation for screen capture
@@ -54,5 +74,22 @@ module.exports = {
   // Get platform-appropriate FFmpeg command parts
   getPlatform() {
     return 'linux';  // Always Linux in Docker
+  },
+
+  // Check if hardware acceleration is enabled
+  isHwAccelEnabled() {
+    return this.hwAccel !== 'none';
+  },
+
+  // Get the encoder to use
+  getEncoder() {
+    switch (this.hwAccel) {
+      case 'nvenc':
+        return 'h264_nvenc';
+      case 'qsv':
+        return 'h264_qsv';
+      default:
+        return 'libx264';
+    }
   },
 };

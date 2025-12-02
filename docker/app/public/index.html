@@ -355,6 +355,85 @@
             </div>
           </div>
 
+          <!-- GPU Status -->
+          <div class="status-card status-card-wide" x-show="gpuStatus.available || gpuStatus.hwAccelEnabled">
+            <div class="status-header">
+              <h3>GPU Acceleration</h3>
+              <span class="badge" :class="gpuStatus.hwAccelEnabled ? 'badge-ok' : 'badge-off'"
+                x-text="gpuStatus.hwAccelEnabled ? gpuStatus.hwAccelType.toUpperCase() : 'CPU'"></span>
+            </div>
+            <div class="status-body">
+              <!-- NVIDIA GPU Info -->
+              <template x-if="gpuStatus.nvidia">
+                <div class="gpu-info">
+                  <div class="gpu-name">
+                    <span class="gpu-icon">🎮</span>
+                    <span x-text="gpuStatus.nvidia.name"></span>
+                  </div>
+                  <div class="gpu-stats">
+                    <div class="gpu-stat">
+                      <label>GPU Usage</label>
+                      <div class="progress-bar">
+                        <div class="progress-fill" :style="'width: ' + gpuStatus.nvidia.utilization.gpu + '%'"></div>
+                      </div>
+                      <span class="stat-value" x-text="gpuStatus.nvidia.utilization.gpu + '%'"></span>
+                    </div>
+                    <div class="gpu-stat">
+                      <label>Encoder</label>
+                      <div class="progress-bar">
+                        <div class="progress-fill encoder" :style="'width: ' + gpuStatus.nvidia.utilization.encoder + '%'"></div>
+                      </div>
+                      <span class="stat-value" x-text="gpuStatus.nvidia.utilization.encoder + '%'"></span>
+                    </div>
+                    <div class="gpu-stat">
+                      <label>VRAM</label>
+                      <div class="progress-bar">
+                        <div class="progress-fill memory" :style="'width: ' + gpuStatus.nvidia.memory.usedPercent + '%'"></div>
+                      </div>
+                      <span class="stat-value" x-text="gpuStatus.nvidia.memory.used + ' / ' + gpuStatus.nvidia.memory.total + ' MB'"></span>
+                    </div>
+                  </div>
+                  <div class="gpu-details">
+                    <span class="gpu-detail">
+                      <span class="detail-label">Temp:</span>
+                      <span class="detail-value" :class="gpuStatus.nvidia.temperature > 80 ? 'hot' : ''" x-text="gpuStatus.nvidia.temperature + '°C'"></span>
+                    </span>
+                    <span class="gpu-detail">
+                      <span class="detail-label">Power:</span>
+                      <span class="detail-value" x-text="gpuStatus.nvidia.powerDraw.toFixed(1) + 'W'"></span>
+                    </span>
+                    <span class="gpu-detail">
+                      <span class="detail-label">Sessions:</span>
+                      <span class="detail-value" x-text="gpuStatus.nvidia.encoderSessions"></span>
+                    </span>
+                    <span class="gpu-detail">
+                      <span class="detail-label">Driver:</span>
+                      <span class="detail-value" x-text="gpuStatus.nvidia.driverVersion"></span>
+                    </span>
+                  </div>
+                  <div class="gpu-encoder-info" x-show="gpuStatus.nvencSettings">
+                    <span class="encoder-label">NVENC:</span>
+                    <span class="encoder-setting">Preset: <strong x-text="gpuStatus.nvencSettings?.preset"></strong></span>
+                    <span class="encoder-setting">Tune: <strong x-text="gpuStatus.nvencSettings?.tune"></strong></span>
+                    <span class="encoder-setting">RC: <strong x-text="gpuStatus.nvencSettings?.rc"></strong></span>
+                  </div>
+                </div>
+              </template>
+              <!-- No GPU / CPU Mode -->
+              <template x-if="!gpuStatus.nvidia && !gpuStatus.intel">
+                <div class="gpu-info">
+                  <p class="gpu-cpu-mode">
+                    <span class="cpu-icon">💻</span>
+                    Using CPU encoding (<span x-text="gpuStatus.encoder"></span>)
+                  </p>
+                  <p class="gpu-hint" x-show="!gpuStatus.available">
+                    For hardware acceleration, use the <code>:nvidia</code> or <code>:intel</code> image tags.
+                  </p>
+                </div>
+              </template>
+            </div>
+          </div>
+
           <!-- Automations Status -->
           <div class="status-card status-card-wide">
             <div class="status-header">

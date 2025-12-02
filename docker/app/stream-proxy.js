@@ -822,6 +822,45 @@ app.post("/api/chrome/reset", async (req, res) => {
   }
 });
 
+// ============================================
+// GPU Monitoring API
+// ============================================
+const gpuMonitor = require('./gpu-monitor');
+
+// Get GPU status
+app.get('/api/gpu/status', (req, res) => {
+  try {
+    const status = gpuMonitor.getStatus();
+    res.json(status);
+  } catch (err) {
+    console.error('[server] Failed to get GPU status:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Test NVENC encoding
+app.post('/api/gpu/test-nvenc', async (req, res) => {
+  try {
+    const result = await gpuMonitor.testNvenc();
+    res.json(result);
+  } catch (err) {
+    console.error('[server] Failed to test NVENC:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get NVENC session limits
+app.get('/api/gpu/sessions', (req, res) => {
+  try {
+    const limits = gpuMonitor.getSessionLimits();
+    res.json(limits || { error: 'No NVIDIA GPU available' });
+  } catch (err) {
+    console.error('[server] Failed to get session limits:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 // ================== CINEBY ENDPOINTS ==================
 
 // Combined M3U playlist (DirecTV channels + Cineby movies)
@@ -2083,6 +2122,10 @@ async function start() {
   // Initialize tuner manager
   console.log('[server] Initializing tuners...');
   await tunerManager.initialize();
+
+  // Initialize GPU monitor
+  console.log('[server] Initializing GPU monitor...');
+  await gpuMonitor.initialize();
 
   // Start HTTP server
   app.listen(config.port, config.host, () => {

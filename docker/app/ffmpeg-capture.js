@@ -104,8 +104,85 @@ class FFmpegCapture {
       const audioBitrate = config.audioBitrate || '128k';
       const width = config.resolution?.width || 1280;
       const height = config.resolution?.height || 720;
+      const encoder = config.getEncoder();
+      const hwAccel = config.hwAccel;
 
       console.log(`[ffmpeg-${this.tunerId}] Using settings: ${width}x${height} @ ${videoBitrate} video, ${audioBitrate} audio`);
+      console.log(`[ffmpeg-${this.tunerId}] Encoder: ${encoder} (hwAccel: ${hwAccel})`);
+
+      // Build video encoder arguments based on hardware acceleration
+      let videoEncoderArgs;
+
+      if (hwAccel === 'nvenc') {
+        // NVIDIA NVENC hardware encoding
+        const nvencPreset = config.nvenc?.preset || 'p4';
+        const nvencTune = config.nvenc?.tune || 'll';
+        const nvencRc = config.nvenc?.rc || 'vbr';
+        const nvencBframes = config.nvenc?.bframes || 0;
+
+        console.log(`[ffmpeg-${this.tunerId}] NVENC settings: preset=${nvencPreset}, tune=${nvencTune}, rc=${nvencRc}`);
+
+        videoEncoderArgs = [
+          '-c:v', 'h264_nvenc',
+          '-preset', nvencPreset,
+          '-tune', nvencTune,
+          '-rc', nvencRc,
+          '-profile:v', 'high',
+          '-level', '4.1',
+          '-pix_fmt', 'yuv420p',
+          '-b:v', videoBitrate,
+          '-maxrate', videoBitrate,
+          '-bufsize', '2M',
+          '-g', '60',
+          '-bf', String(nvencBframes),
+          '-flags', '+cgop',
+        ];
+
+        // Add lookahead if configured (0 = disabled)
+        if (config.nvenc?.lookahead > 0) {
+          videoEncoderArgs.push('-rc-lookahead', String(config.nvenc.lookahead));
+        }
+      } else if (hwAccel === 'qsv') {
+        // Intel QuickSync hardware encoding (future)
+        const qsvPreset = config.qsv?.preset || 'fast';
+
+        console.log(`[ffmpeg-${this.tunerId}] QSV settings: preset=${qsvPreset}`);
+
+        videoEncoderArgs = [
+          '-c:v', 'h264_qsv',
+          '-preset', qsvPreset,
+          '-profile:v', 'high',
+          '-level', '4.1',
+          '-pix_fmt', 'nv12',
+          '-b:v', videoBitrate,
+          '-maxrate', videoBitrate,
+          '-bufsize', '2M',
+          '-g', '60',
+          '-bf', '0',
+          '-flags', '+cgop',
+        ];
+      } else {
+        // Software encoding (libx264)
+        videoEncoderArgs = [
+          '-c:v', 'libx264',
+          '-preset', 'veryfast',
+          '-tune', 'zerolatency',
+          '-profile:v', 'high',
+          '-level', '4.1',
+          '-pix_fmt', 'yuv420p',
+          '-crf', '23',
+          '-b:v', videoBitrate,
+          '-maxrate', videoBitrate,
+          '-bufsize', '2M',
+          '-g', '60',
+          '-keyint_min', '30',
+          '-bf', '2',
+          '-b_strategy', '1',
+          '-sc_threshold', '40',
+          '-refs', '3',
+          '-flags', '+cgop',
+        ];
+      }
 
       args = [
         '-thread_queue_size', '1024',
@@ -117,23 +194,7 @@ class FFmpegCapture {
         '-f', 'pulse',
         '-ac', '2',
         '-i', 'virtual_speaker.monitor',
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-tune', 'zerolatency',
-        '-profile:v', 'high',
-        '-level', '4.1',
-        '-pix_fmt', 'yuv420p',
-        '-crf', '23',
-        '-b:v', videoBitrate,
-        '-maxrate', videoBitrate,
-        '-bufsize', '2M',
-        '-g', '60',
-        '-keyint_min', '30',
-        '-bf', '2',
-        '-b_strategy', '1',
-        '-sc_threshold', '40',
-        '-refs', '3',
-        '-flags', '+cgop',
+        ...videoEncoderArgs,
         '-c:a', 'aac',
         '-b:a', audioBitrate,
         '-ar', '48000',

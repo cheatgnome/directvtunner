@@ -1,6 +1,6 @@
 {
   "name": "dvr-player",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "description": "DirecTV IPTV Proxy Server - Stream DRM content via HLS",
   "main": "stream-proxy.js",
   "scripts": {
