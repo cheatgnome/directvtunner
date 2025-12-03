@@ -35,7 +35,7 @@ class TunerManager {
   }
 
   startIdleCleanup() {
-    setInterval(() => {
+    setInterval(async () => {
       for (const tuner of this.tuners) {
         // Release idle streaming tuners
         if (tuner.state === TunerState.STREAMING && tuner.isIdle()) {
@@ -47,6 +47,19 @@ class TunerManager {
         if (tuner.state === TunerState.ERROR) {
           console.log(`[tuner-manager] Tuner ${tuner.id} in ERROR state, attempting auto-recovery...`);
           this.recoverTuner(tuner.id);
+        }
+
+        // Periodic health check for FREE tuners - check CDP connection
+        if (tuner.state === TunerState.FREE) {
+          try {
+            const healthy = await tuner.checkConnectionHealth();
+            if (!healthy) {
+              console.log(`[tuner-manager] Tuner ${tuner.id} CDP connection unhealthy, reconnecting...`);
+              await tuner.reconnect();
+            }
+          } catch (e) {
+            console.log(`[tuner-manager] Tuner ${tuner.id} health check error: ${e.message}`);
+          }
         }
       }
     }, 30000);  // Check every 30 seconds
@@ -63,12 +76,19 @@ class TunerManager {
         try { tuner.ffmpeg.stop(); } catch (e) {}
       }
 
-      // Reset state
-      tuner.state = TunerState.FREE;
-      tuner.currentChannel = null;
-      tuner.clients = 0;
+      // Try to reconnect the CDP connection
+      console.log(`[tuner-manager] Attempting to reconnect tuner ${tunerId}...`);
+      const reconnected = await tuner.reconnect();
 
-      console.log(`[tuner-manager] Tuner ${tunerId} recovered to FREE state`);
+      if (reconnected) {
+        console.log(`[tuner-manager] Tuner ${tunerId} recovered and reconnected to Chrome`);
+      } else {
+        // Fallback: just reset the state so it can try again later
+        tuner.state = TunerState.FREE;
+        tuner.currentChannel = null;
+        tuner.clients = 0;
+        console.log(`[tuner-manager] Tuner ${tunerId} reset to FREE state (reconnect will retry on next use)`);
+      }
     } catch (err) {
       console.error(`[tuner-manager] Failed to recover tuner ${tunerId}:`, err.message);
     }

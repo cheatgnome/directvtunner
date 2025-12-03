@@ -1,7 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 
-const SETTINGS_PATH = path.join(__dirname, 'data', 'settings.json');
+// Use /data for persistent storage (Docker volume mount point)
+const SETTINGS_PATH = process.env.DVR_DATA_DIR
+  ? path.join(process.env.DVR_DATA_DIR, 'settings.json')
+  : '/data/settings.json';
 
 // Default settings - matches current config.js values
 const DEFAULTS = {

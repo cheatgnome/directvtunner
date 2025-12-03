@@ -1,0 +1,32 @@
+version: '3.8'
+
+# Intel VAAPI Multi-Tuner Configuration
+# Uses VA-API hardware acceleration
+# Requires: Intel GPU with VA-API support
+
+services:
+  dvr-tuner-intel:
+    container_name: dvr-tuner-intel
+    image: sunnyside1/directvtuner:intel-vaapi
+    # Or build locally:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile.intel
+    hostname: dvr-tuner-intel
+    restart: unless-stopped
+    shm_size: '2gb'
+    privileged: true  # Required for intel_gpu_top monitoring
+    devices:
+      - /dev/dri:/dev/dri
+    ports:
+      - "7070:7070"
+      - "6080:6080"
+      - "5901:5901"
+    volumes:
+      - /home/gszulc/dvr-data:/data
+    environment:
+      - TZ=America/New_York
+      - DISPLAY=:1
+      - DVR_NUM_TUNERS=3
+      - DVR_PORT=7070
+      - DVR_HW_ACCEL=vaapi

@@ -1,0 +1,45 @@
+version: '3.8'
+
+# NVIDIA Multi-Tuner Configuration
+# Uses NVENC hardware acceleration
+# Requires: NVIDIA GPU + nvidia-container-toolkit
+
+services:
+  dvr-tuner-nvidia:
+    container_name: dvr-tuner-nvidia
+    image: sunnyside1/directvtuner:nvidia-multi
+    # Or build locally:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile.nvidia
+    hostname: dvr-tuner-nvidia
+    restart: unless-stopped
+    shm_size: '2gb'
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, video]
+    networks:
+      br0:
+        ipv4_address: 192.168.1.93
+    volumes:
+      - /mnt/user/appdata/dvr-tuner-nvidia:/data
+    environment:
+      - TZ=America/New_York
+      - DISPLAY=:1
+      - DVR_NUM_TUNERS=3
+      - DVR_PORT=7070
+      - DVR_HW_ACCEL=nvenc
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=video,compute,utility
+
+networks:
+  br0:
+    external: true
+    driver: macvlan
+    driver_opts:
+      parent: br0

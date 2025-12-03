@@ -35,11 +35,18 @@ module.exports = {
   },
   videoBitrate: '4M',
   audioBitrate: '128k',
-  hlsSegmentTime: 2,
-  hlsListSize: 5,
+
+  // HLS settings (better for multiple clients watching same channel)
+  hlsMode: process.env.DVR_HLS_MODE !== 'false', // Default true, set DVR_HLS_MODE=false to use MPEG-TS pipe
+  hls: {
+    segmentTime: parseInt(process.env.DVR_HLS_SEGMENT_TIME) || 4,  // Seconds per segment (4s = less HTTP overhead)
+    listSize: parseInt(process.env.DVR_HLS_LIST_SIZE) || 6,        // Segments in playlist (24s buffer)
+  },
+  hlsSegmentTime: 4,  // Legacy
+  hlsListSize: 6,     // Legacy
 
   // Hardware acceleration settings
-  // DVR_HW_ACCEL: 'none' | 'nvenc' | 'qsv' (auto-detected from env)
+  // DVR_HW_ACCEL: 'none' | 'nvenc' | 'vaapi' | 'qsv' (auto-detected from env)
   hwAccel: process.env.DVR_HW_ACCEL || 'none',
 
   // NVENC-specific settings
@@ -87,6 +94,8 @@ module.exports = {
     switch (this.hwAccel) {
       case 'nvenc':
         return 'h264_nvenc';
+      case 'vaapi':
+        return 'h264_vaapi';
       case 'qsv':
         return 'h264_qsv';
       default:

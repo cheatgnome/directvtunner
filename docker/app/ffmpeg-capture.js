@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { PassThrough } = require('stream');
 const config = require('./config');
+const settingsManager = require('./settings-manager');
 
 class FFmpegCapture {
   constructor(tunerId, outputDir) {
@@ -23,6 +24,13 @@ class FFmpegCapture {
     this.useHwAccel = config.hwAccel; // Track current hw accel mode (can fallback to 'none')
     this.hwAccelFailed = false; // Track if hw accel failed for this session
     this.nvencErrorDetected = false; // Track if we saw actual NVENC errors (not just process kill)
+
+    // HLS output mode (better for multiple clients)
+    this.hlsMode = config.hlsMode !== false; // Default to HLS mode
+    this.hlsDir = path.join(config.hlsDir || '/data/streams', `tuner-${tunerId}`);
+    this.hlsPlaylist = path.join(this.hlsDir, 'stream.m3u8');
+    this.hlsSegmentTime = config.hls?.segmentTime || 2;
+    this.hlsListSize = config.hls?.listSize || 5;
 
     this.stats = {
       startTime: null,
@@ -111,14 +119,21 @@ class FFmpegCapture {
         'pipe:1',
       ];
     } else {
-      // Linux: Use config values for resolution, bitrate, audio
-      const videoBitrate = config.videoBitrate || '4M';
-      const audioBitrate = config.audioBitrate || '128k';
-      const width = config.resolution?.width || 1280;
-      const height = config.resolution?.height || 720;
+      // Linux: Read user settings from settingsManager (falls back to defaults)
+      const settings = settingsManager.getSettings();
+      const videoBitrate = settings.video?.bitrate || config.videoBitrate || '4M';
+      const audioBitrate = settings.audio?.bitrate || config.audioBitrate || '128k';
+      const width = settings.video?.resolution?.width || config.resolution?.width || 1280;
+      const height = settings.video?.resolution?.height || config.resolution?.height || 720;
+      // HLS settings from user config
+      this.hlsSegmentTime = settings.hls?.segmentTime || config.hls?.segmentTime || 4;
+      this.hlsListSize = settings.hls?.listSize || config.hls?.listSize || 6;
       // Use instance hwAccel which may have been downgraded from NVENC to none
+      // hwAccel comes from config (env var), not user settings
       const hwAccel = this.useHwAccel;
-      const encoder = hwAccel === 'nvenc' ? 'h264_nvenc' : (hwAccel === 'qsv' ? 'h264_qsv' : 'libx264');
+      const encoder = hwAccel === 'nvenc' ? 'h264_nvenc' :
+                      (hwAccel === 'qsv' ? 'h264_qsv' :
+                      (hwAccel === 'vaapi' ? 'h264_vaapi' : 'libx264'));
 
       console.log(`[ffmpeg-${this.tunerId}] Using settings: ${width}x${height} @ ${videoBitrate} video, ${audioBitrate} audio`);
       console.log(`[ffmpeg-${this.tunerId}] Encoder: ${encoder} (hwAccel: ${hwAccel})${this.hwAccelFailed ? ' [NVENC failed, using fallback]' : ''}`);
@@ -157,7 +172,7 @@ class FFmpegCapture {
           videoEncoderArgs.push('-rc-lookahead', String(config.nvenc.lookahead));
         }
       } else if (hwAccel === 'qsv') {
-        // Intel QuickSync hardware encoding (future)
+        // Intel QuickSync hardware encoding
         const qsvPreset = config.qsv?.preset || 'fast';
 
         console.log(`[ffmpeg-${this.tunerId}] QSV settings: preset=${qsvPreset}`);
@@ -174,6 +189,20 @@ class FFmpegCapture {
           '-g', '60',
           '-bf', '0',
           '-flags', '+cgop',
+        ];
+      } else if (hwAccel === 'vaapi') {
+        // Intel VAAPI hardware encoding (Linux)
+        console.log(`[ffmpeg-${this.tunerId}] VAAPI settings: using /dev/dri/renderD128`);
+
+        videoEncoderArgs = [
+          '-c:v', 'h264_vaapi',
+          '-profile:v', 'high',
+          '-level', '4.1',
+          '-b:v', videoBitrate,
+          '-maxrate', videoBitrate,
+          '-bufsize', '12M',
+          '-g', '60',
+          '-bf', '0',
         ];
       } else {
         // Software encoding (libx264)
@@ -198,7 +227,51 @@ class FFmpegCapture {
         ];
       }
 
+      // Output format: HLS segments or MPEG-TS pipe
+      let outputArgs;
+      if (this.hlsMode) {
+        // Ensure HLS directory exists
+        if (!fs.existsSync(this.hlsDir)) {
+          fs.mkdirSync(this.hlsDir, { recursive: true });
+        }
+        // Clean old segments
+        const oldFiles = fs.readdirSync(this.hlsDir).filter(f => f.endsWith('.ts') || f.endsWith('.m3u8'));
+        for (const f of oldFiles) {
+          try { fs.unlinkSync(path.join(this.hlsDir, f)); } catch (e) {}
+        }
+
+        outputArgs = [
+          '-f', 'hls',
+          '-hls_time', String(this.hlsSegmentTime),
+          '-hls_list_size', String(this.hlsListSize),
+          '-hls_flags', 'delete_segments+append_list',
+          '-hls_segment_filename', path.join(this.hlsDir, 'segment%03d.ts'),
+          this.hlsPlaylist,
+        ];
+        console.log(`[ffmpeg-${this.tunerId}] HLS mode: ${this.hlsSegmentTime}s segments, ${this.hlsListSize} in playlist`);
+      } else {
+        outputArgs = [
+          '-f', 'mpegts',
+          'pipe:1',
+        ];
+      }
+
+      // Use per-tuner audio sink for isolated audio capture
+      const audioSink = `virtual_speaker_${this.tunerId}.monitor`;
+
+      // Hardware acceleration initialization args
+      let hwInitArgs = [];
+      let vaapiFilter = [];
+      if (hwAccel === 'qsv') {
+        hwInitArgs = ['-init_hw_device', 'qsv=qsv:hw', '-filter_hw_device', 'qsv'];
+      } else if (hwAccel === 'vaapi') {
+        hwInitArgs = ['-vaapi_device', '/dev/dri/renderD128'];
+        vaapiFilter = ['-vf', 'format=nv12,hwupload'];
+      }
+
       args = [
+        ...hwInitArgs,
+        '-fflags', '+genpts',
         '-thread_queue_size', '1024',
         '-f', 'x11grab',
         '-framerate', '30',
@@ -207,22 +280,20 @@ class FFmpegCapture {
         '-thread_queue_size', '1024',
         '-f', 'pulse',
         '-ac', '2',
-        '-i', 'virtual_speaker.monitor',
+        '-i', audioSink,
+        ...vaapiFilter,
         ...videoEncoderArgs,
         '-c:a', 'aac',
         '-b:a', audioBitrate,
         '-ar', '48000',
         '-ac', '2',
-        '-async', '1',
+        '-af', 'aresample=async=1:min_hard_comp=0.1:first_pts=0',
         '-vsync', 'cfr',
-        '-muxdelay', '0',
-        '-muxpreload', '0',
-        '-f', 'mpegts',
-        'pipe:1',
+        ...outputArgs,
       ];
     }
 
-    console.log(`[ffmpeg-${this.tunerId}] Starting MPEG-TS capture...`);
+    console.log(`[ffmpeg-${this.tunerId}] Starting ${this.hlsMode ? 'HLS' : 'MPEG-TS'} capture...`);
     console.log(`[ffmpeg-${this.tunerId}] FFmpeg args: ffmpeg ${args.join(' ')}`);
 
     // Set environment variables for FFmpeg
@@ -473,6 +544,100 @@ class FFmpegCapture {
     this.stopping = false;
   }
 
+  async startPlaceholder(displayNum, message) {
+    // Stop any existing stream first
+    if (this.isRunning && this.process) {
+      await this.stopAndWait();
+    }
+
+    this.displayNum = displayNum;
+    this.shouldRestart = true;
+    this.restartAttempts = 0;
+    this.stopping = false;
+
+    this.broadcastStream = new PassThrough();
+
+    this.stats.startTime = Date.now();
+    this.stats.bytesTransferred = 0;
+    this.stats.errors = [];
+    this.stats.encoder = 'lavfi (placeholder)';
+
+    // Read user settings for placeholder resolution
+    const settings = settingsManager.getSettings();
+    const width = settings.video?.resolution?.width || config.resolution?.width || 1920;
+    const height = settings.video?.resolution?.height || config.resolution?.height || 1080;
+    const videoBitrate = settings.video?.bitrate || config.videoBitrate || '4M';
+
+    // Escape special characters for FFmpeg drawtext filter
+    const escapedMessage = message
+      .replace(/:/g, '\\:')
+      .replace(/'/g, "\\'");
+
+    // Generate placeholder with test pattern and text overlay
+    // Using lavfi (libavfilter virtual input) to generate video
+    const args = [
+      '-f', 'lavfi',
+      '-i', `color=c=0x1a1a2e:s=${width}x${height}:r=30,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:fontsize=48:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2-60:text='No Upcoming Airings',drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:fontsize=32:fontcolor=0xcccccc:x=(w-text_w)/2:y=(h-text_h)/2+20:text='Please change channel',drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:fontsize=24:fontcolor=0x888888:x=(w-text_w)/2:y=h-80:text='DirecTV Tuner'`,
+      '-f', 'lavfi',
+      '-i', 'anullsrc=r=48000:cl=stereo',
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-tune', 'stillimage',
+      '-pix_fmt', 'yuv420p',
+      '-b:v', '500k',
+      '-g', '60',
+      '-c:a', 'aac',
+      '-b:a', '64k',
+      '-ar', '48000',
+      '-ac', '2',
+      '-f', 'mpegts',
+      'pipe:1',
+    ];
+
+    console.log(`[ffmpeg-${this.tunerId}] Starting placeholder stream...`);
+    console.log(`[ffmpeg-${this.tunerId}] Message: ${message}`);
+
+    this.process = spawn('ffmpeg', args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    this.process.stdout.on('data', (data) => {
+      this.stats.bytesTransferred += data.length;
+      this.stats.lastActivity = Date.now();
+
+      for (let i = this.clients.length - 1; i >= 0; i--) {
+        const client = this.clients[i];
+        if (client.writable && !client.destroyed) {
+          try {
+            client.write(data);
+          } catch (err) {
+            this.clients.splice(i, 1);
+            console.log(`[ffmpeg-${this.tunerId}] Placeholder client write error, ${this.clients.length} remaining`);
+          }
+        } else {
+          this.clients.splice(i, 1);
+          console.log(`[ffmpeg-${this.tunerId}] Removed dead placeholder client, ${this.clients.length} remaining`);
+        }
+      }
+    });
+
+    this.process.stderr.on('data', (data) => {
+      const msg = data.toString();
+      if (msg.includes('Error') || msg.includes('error')) {
+        console.error(`[ffmpeg-${this.tunerId}] Placeholder error: ${msg}`);
+      }
+    });
+
+    this.process.on('close', (code) => {
+      console.log(`[ffmpeg-${this.tunerId}] Placeholder stream ended with code ${code}`);
+      this.isRunning = false;
+      this.process = null;
+    });
+
+    this.isRunning = true;
+    console.log(`[ffmpeg-${this.tunerId}] Placeholder MPEG-TS stream ready`);
+  }
+
   stop() {
     this.cancelIdleTimer();
     this.shouldRestart = false;
@@ -545,11 +710,38 @@ class FFmpegCapture {
   }
 
   getPlaylistPath() {
+    if (this.hlsMode) {
+      return this.hlsPlaylist;
+    }
     return null;
   }
 
   getSegmentPath(filename) {
+    if (this.hlsMode) {
+      return path.join(this.hlsDir, filename);
+    }
     return null;
+  }
+
+  // Check if HLS playlist is ready (has segments)
+  isHlsReady() {
+    if (!this.hlsMode) return false;
+    try {
+      if (!fs.existsSync(this.hlsPlaylist)) return false;
+      const content = fs.readFileSync(this.hlsPlaylist, 'utf8');
+      return content.includes('.ts');
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Get HLS directory for this tuner
+  getHlsDir() {
+    return this.hlsDir;
+  }
+
+  isHlsMode() {
+    return this.hlsMode;
   }
 }
 

@@ -5,6 +5,7 @@ const fs = require('fs');
 const config = require('./config');
 const FFmpegCapture = require('./ffmpeg-capture');
 const { getChannel, getChannelUrl } = require('./channels');
+const directvEpg = require('./directv-epg');
 
 // Tuner states
 const TunerState = {
@@ -32,6 +33,12 @@ class Tuner {
     this.browser = null;
     this.page = null;
     this.ffmpeg = null;
+
+    // CDP connection health tracking
+    this.lastConnectionCheck = Date.now();
+    this.connectionHealthy = false;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
 
     // Paths
     this.outputDir = path.join(config.hlsDir, `tuner${id}`);
@@ -187,15 +194,134 @@ class Tuner {
     const pages = context.pages();
     this.page = pages[0] || await context.newPage();
 
+    // Mark connection as healthy
+    this.connectionHealthy = true;
+    this.lastConnectionCheck = Date.now();
+    this.reconnectAttempts = 0;
+
+    // Set up disconnect handler
+    this.browser.on('disconnected', () => {
+      console.log(`[tuner-${this.id}] Browser disconnected! Will attempt reconnect on next operation.`);
+      this.connectionHealthy = false;
+      this.browser = null;
+      this.page = null;
+    });
+
     console.log(`[tuner-${this.id}] Playwright connected`);
   }
 
+  // Check if the CDP connection is still healthy
+  async checkConnectionHealth() {
+    // Don't check too frequently (at most every 5 seconds)
+    if (Date.now() - this.lastConnectionCheck < 5000) {
+      return this.connectionHealthy;
+    }
+
+    this.lastConnectionCheck = Date.now();
+
+    try {
+      // Quick health check - try to get the page URL
+      if (!this.browser || !this.page) {
+        this.connectionHealthy = false;
+        return false;
+      }
+
+      // Try a simple operation that will fail if connection is dead
+      await this.page.evaluate(() => true);
+      this.connectionHealthy = true;
+      return true;
+    } catch (err) {
+      console.log(`[tuner-${this.id}] Connection health check failed: ${err.message}`);
+      this.connectionHealthy = false;
+      return false;
+    }
+  }
+
+  // Attempt to reconnect to Chrome
+  async reconnect() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error(`[tuner-${this.id}] Max reconnect attempts (${this.maxReconnectAttempts}) reached`);
+      this.state = TunerState.ERROR;
+      return false;
+    }
+
+    this.reconnectAttempts++;
+    console.log(`[tuner-${this.id}] Attempting reconnect (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+
+    try {
+      // Clean up old browser connection if exists
+      if (this.browser) {
+        try {
+          await this.browser.close();
+        } catch (e) {
+          // Ignore - browser might already be dead
+        }
+        this.browser = null;
+        this.page = null;
+      }
+
+      // Wait for Chrome to be available
+      await this.waitForChrome();
+
+      // Reconnect Playwright
+      await this.connectPlaywright();
+
+      console.log(`[tuner-${this.id}] Reconnected successfully!`);
+
+      // Reset state to FREE if we were in error
+      if (this.state === TunerState.ERROR) {
+        this.state = TunerState.FREE;
+        this.currentChannel = null;
+      }
+
+      return true;
+    } catch (err) {
+      console.error(`[tuner-${this.id}] Reconnect attempt ${this.reconnectAttempts} failed: ${err.message}`);
+
+      // Wait before next attempt (exponential backoff)
+      const waitTime = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+      console.log(`[tuner-${this.id}] Waiting ${waitTime}ms before next reconnect attempt...`);
+      await new Promise(r => setTimeout(r, waitTime));
+
+      return false;
+    }
+  }
+
+  // Ensure connection is healthy before operations, reconnect if needed
+  async ensureConnection() {
+    const healthy = await this.checkConnectionHealth();
+
+    if (!healthy) {
+      console.log(`[tuner-${this.id}] Connection unhealthy, attempting reconnect...`);
+      const reconnected = await this.reconnect();
+
+      if (!reconnected) {
+        throw new Error('Failed to establish connection to Chrome');
+      }
+    }
+
+    return true;
+  }
+
   async tuneToChannel(channelId) {
+    // Ensure CDP connection is healthy before tuning
+    try {
+      await this.ensureConnection();
+    } catch (err) {
+      console.error(`[tuner-${this.id}] Cannot tune - connection failed: ${err.message}`);
+      this.state = TunerState.ERROR;
+      throw err;
+    }
+
     if (!this.page) {
       throw new Error('Tuner not started');
     }
 
-    const channel = getChannel(channelId);
+    let channel = getChannel(channelId);
+    if (!channel) {
+      // Try EPG data for dynamically discovered channels (like locals)
+      channel = directvEpg.getChannelByNumber(channelId);
+    }
     if (!channel) {
       throw new Error(`Unknown channel: ${channelId}`);
     }
@@ -391,6 +517,19 @@ class Tuner {
 
       if (!clicked.clicked) {
         console.log(`[tuner-${this.id}] Could not find channel ${channel.name} in guide`);
+      }
+
+      // Check for "No upcoming airings" modal before looking for play button
+      const noAirings = await this.checkNoUpcomingAirings();
+      if (noAirings) {
+        console.log(`[tuner-${this.id}] Channel ${channel.name} has no upcoming airings - playing placeholder`);
+        // Close the modal first
+        await this.closeNoAiringsModal();
+        // Start placeholder video stream
+        await this.startPlaceholderStream(channel.name);
+        this.state = TunerState.STREAMING;
+        console.log(`[tuner-${this.id}] Now streaming placeholder for ${channel.name}`);
+        return true;
       }
 
       // Wait for play button to appear and click it (smart wait instead of fixed delay)
@@ -623,6 +762,61 @@ class Tuner {
     return false;
   }
 
+  async checkNoUpcomingAirings() {
+    // Wait a moment for the modal to fully load
+    await new Promise(r => setTimeout(r, 1000));
+
+    try {
+      const hasNoAirings = await this.page.evaluate(() => {
+        // Look for "No upcoming airings" text in the page
+        const bodyText = document.body.innerText || '';
+        return bodyText.includes('No upcoming airings');
+      });
+      return hasNoAirings;
+    } catch (e) {
+      console.log(`[tuner-${this.id}] Error checking for no airings: ${e.message}`);
+      return false;
+    }
+  }
+
+  async closeNoAiringsModal() {
+    try {
+      // Try to close the modal by clicking the X button or pressing Escape
+      await this.page.evaluate(() => {
+        // Look for close button (X)
+        const closeButtons = document.querySelectorAll('[aria-label="close"], [aria-label="Close"], button');
+        for (const btn of closeButtons) {
+          const text = btn.textContent || '';
+          const ariaLabel = btn.getAttribute('aria-label') || '';
+          if (text === '×' || text === 'X' || ariaLabel.toLowerCase().includes('close')) {
+            btn.click();
+            return true;
+          }
+        }
+        return false;
+      });
+
+      // Also try pressing Escape
+      await this.page.keyboard.press('Escape');
+      await new Promise(r => setTimeout(r, 500));
+    } catch (e) {
+      console.log(`[tuner-${this.id}] Error closing modal: ${e.message}`);
+    }
+  }
+
+  async startPlaceholderStream(channelName) {
+    // Generate a placeholder video using FFmpeg with text overlay
+    // This creates a test pattern with "No Upcoming Airings" message
+
+    const placeholderText = `Channel: ${channelName}\\nNo Upcoming Airings\\nPlease change channel`;
+
+    // Use FFmpeg to generate a test pattern with text
+    // The FFmpegCapture class will handle the stream, but we need to use lavfi input instead of screen capture
+    if (this.ffmpeg) {
+      await this.ffmpeg.startPlaceholder(this.displayNum, placeholderText);
+    }
+  }
+
   async maximizeVideo() {
     try {
       console.log(`[tuner-${this.id}] Maximizing video and unmuting...`);
@@ -789,6 +983,12 @@ class Tuner {
         await this.ffmpeg.start(this.displayNum);
       }
       this.ffmpeg.addClient(res);
+
+      // Track client disconnect to update tuner client count
+      res.on('close', () => {
+        this.removeClient();
+      });
+
       return true;
     }
     return false;

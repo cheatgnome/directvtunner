@@ -42,11 +42,11 @@ A Docker-based IPTV proxy that turns DirecTV Stream into an M3U playlist compati
 # CPU-only (default)
 docker pull sunnyside1/directvtuner:latest
 
-# NVIDIA GPU accelerated
-docker pull sunnyside1/directvtuner:nvidia
+# NVIDIA GPU accelerated (single or multi-tuner)
+docker pull sunnyside1/directvtuner:nvidia-multi
 
-# Intel QSV accelerated (coming soon)
-docker pull sunnyside1/directvtuner:intel
+# Intel VAAPI accelerated (single or multi-tuner)
+docker pull sunnyside1/directvtuner:intel-vaapi
 ```
 
 ### Image Tags
@@ -54,8 +54,16 @@ docker pull sunnyside1/directvtuner:intel
 | Tag | Description | Hardware |
 |-----|-------------|----------|
 | `latest` | CPU-only encoding (libx264) | Any |
-| `nvidia` | NVIDIA NVENC hardware encoding | NVIDIA GPU (GTX 600+) |
-| `intel` | Intel QuickSync encoding (coming soon) | Intel CPU with iGPU |
+| `nvidia` | NVIDIA NVENC single-tuner | NVIDIA GPU (GTX 600+) |
+| `nvidia-multi` | NVIDIA NVENC multi-tuner | NVIDIA GPU (GTX 600+) |
+| `intel-vaapi` | Intel VA-API (single or multi-tuner) | Intel CPU with iGPU |
+
+### Multi-Tuner Support
+
+All GPU images support multi-tuner via the `DVR_NUM_TUNERS` environment variable:
+- Set `DVR_NUM_TUNERS=3` for 3 simultaneous tuners
+- Each tuner runs its own Chrome instance
+- Requires separate DirecTV login per tuner (via VNC)
 
 ---
 
@@ -272,6 +280,65 @@ The web GUI (Status tab) shows real-time GPU stats:
 
 ---
 
+## GPU Acceleration (Intel VA-API)
+
+For Intel CPUs with integrated graphics, use the VA-API accelerated image.
+
+### Requirements
+
+1. **Intel CPU with iGPU** (4th gen Core or newer recommended)
+2. **VA-API drivers** installed on host (usually automatic on Linux)
+3. Access to `/dev/dri` device
+
+### Docker Run with Intel VA-API
+
+```bash
+# Single tuner
+docker run -d \
+  --name dvr-tuner-intel \
+  --privileged \
+  --device /dev/dri:/dev/dri \
+  -e DVR_HW_ACCEL=vaapi \
+  -p 7070:7070 \
+  -p 6080:6080 \
+  -p 5901:5901 \
+  -v ./dvr-data:/data \
+  sunnyside1/directvtuner:intel-vaapi
+
+# Multi-tuner (3 tuners)
+docker run -d \
+  --name dvr-tuner-intel \
+  --privileged \
+  --device /dev/dri:/dev/dri \
+  -e DVR_NUM_TUNERS=3 \
+  -e DVR_HW_ACCEL=vaapi \
+  -p 7070:7070 \
+  -p 6080:6080 \
+  -p 5901:5901 \
+  -v ./dvr-data:/data \
+  sunnyside1/directvtuner:intel-vaapi
+```
+
+### Docker Compose with Intel VA-API
+
+Use the provided `docker-compose.intel-multi.yml`:
+
+```bash
+docker-compose -f docker-compose.intel-multi.yml up -d
+```
+
+### Intel GPU Monitoring
+
+The web GUI shows Intel GPU stats:
+- GPU Name & Driver Version
+- VA-API Support Status
+- Video Engine Utilization (when streaming)
+- Render Device Path
+
+**Note:** `--privileged` flag is required for `intel_gpu_top` monitoring.
+
+---
+
 ## First-Time Setup
 
 1. Start the container using one of the network configurations above
@@ -452,23 +519,35 @@ http://<SERVER_IP>:7070/stream/espn
 ## Files Structure
 
 ```
-/app
-├── stream-proxy.js          # Main server
-├── directv-epg.js           # EPG service with auto-refresh
-├── cinemaos-db-manager.js   # Movie database with auto-refresh
-├── cineby-tv-manager.js     # TV show database with auto-refresh
-├── tuner-manager.js         # DirecTV tuner management
-├── channels.js              # Channel definitions
-├── providers/
-│   ├── base-provider.js     # Base provider class
-│   ├── cinemaos/            # CinemaOS provider (direct API)
-│   └── cineby/              # Cineby provider
-└── data/
-    ├── cinemaos-movies-db.json  # Movie database (23K+ movies)
-    ├── cinemaos-movies.m3u      # Movie M3U playlist
-    ├── cineby-tv-db.json        # TV show database (3K+ shows)
-    ├── cineby-tv.m3u            # TV show M3U playlist
-    └── epg-cache.json           # EPG cache
+/docker
+├── Dockerfile                       # CPU-only base image
+├── Dockerfile.nvidia                # NVIDIA NVENC image
+├── Dockerfile.intel                 # Intel VA-API image
+├── docker-compose.yml               # Basic single-tuner
+├── docker-compose.nvidia-multi.yml  # NVIDIA multi-tuner
+├── docker-compose.intel-multi.yml   # Intel VA-API multi-tuner
+├── supervisord.conf
+├── start-*.sh                       # Startup scripts
+└── app/
+    ├── stream-proxy.js              # Main server
+    ├── directv-epg.js               # EPG service with auto-refresh
+    ├── cinemaos-db-manager.js       # Movie database with auto-refresh
+    ├── cineby-tv-manager.js         # TV show database with auto-refresh
+    ├── tuner-manager.js             # DirecTV tuner management
+    ├── gpu-monitor.js               # GPU detection & monitoring
+    ├── ffmpeg-capture.js            # FFmpeg capture with HW accel
+    ├── config.js                    # Configuration
+    ├── channels.js                  # Channel definitions
+    ├── providers/
+    │   ├── base-provider.js         # Base provider class
+    │   ├── cinemaos/                # CinemaOS provider (direct API)
+    │   └── cineby/                  # Cineby provider
+    └── data/
+        ├── cinemaos-movies-db.json  # Movie database (23K+ movies)
+        ├── cinemaos-movies.m3u      # Movie M3U playlist
+        ├── cineby-tv-db.json        # TV show database (3K+ shows)
+        ├── cineby-tv.m3u            # TV show M3U playlist
+        └── epg-cache.json           # EPG cache
 ```
 
 ---

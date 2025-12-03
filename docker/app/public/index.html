@@ -309,12 +309,22 @@
           <div class="status-card">
             <div class="status-header">
               <h3>Tuners</h3>
-              <span class="badge badge-ok" x-text="systemStatus.tuners.active + '/' + systemStatus.tuners.total + ' active'"></span>
+              <span class="badge badge-ok" x-text="systemStatus.tuners.active + '/' + systemStatus.tuners.total + ' ACTIVE'"></span>
             </div>
             <div class="status-body">
+              <div class="tuner-legend">
+                <span class="legend-item"><span class="login-dot logged-in"></span> Logged in</span>
+                <span class="legend-item"><span class="login-dot needs-login"></span> Needs login</span>
+                <span class="legend-item"><span class="legend-icon">↺</span> Reset</span>
+                <span class="legend-item"><span class="legend-icon">🗑</span> Clear cache</span>
+                <span class="legend-item"><span class="legend-icon">VNC</span> Browser</span>
+              </div>
               <template x-for="tuner in systemStatus.tuners.list" :key="tuner.id">
                 <div class="tuner-item">
-                  <span class="tuner-id" x-text="'Tuner ' + tuner.id"></span>
+                  <span class="tuner-id">
+                    <span x-text="'Tuner ' + tuner.id"></span>
+                    <span class="login-dot" :class="tuner.loggedIn ? 'logged-in' : 'needs-login'" :title="tuner.loggedIn ? 'Logged in' : 'Needs login'"></span>
+                  </span>
                   <span class="tuner-channel" x-show="tuner.streaming">
                     <span class="channel-num" x-text="tuner.channel"></span>
                     <span class="channel-name" x-text="tuner.channelName"></span>
@@ -322,6 +332,17 @@
                   <span class="tuner-status"
                     :class="tuner.state === 'error' ? 'error' : (tuner.streaming ? 'streaming' : 'idle')"
                     x-text="tuner.state === 'error' ? 'ERROR' : (tuner.streaming ? tuner.uptime : 'Idle')"></span>
+                  <div class="tuner-actions">
+                    <button class="btn-tiny btn-reset-tuner" @click="resetTuner(tuner.id)" title="Reset this tuner">
+                      ↺
+                    </button>
+                    <button class="btn-tiny btn-cache-tuner" @click="clearCache(tuner.id)" title="Clear Chrome cache (fixes streaming limit errors)">
+                      🗑
+                    </button>
+                    <button class="btn-tiny btn-vnc-tuner" @click="openVNC(tuner.id)" title="Open noVNC for this tuner">
+                      VNC
+                    </button>
+                  </div>
                 </div>
               </template>
               <button class="btn-small btn-danger" @click="resetStreams()" :disabled="resettingStreams">

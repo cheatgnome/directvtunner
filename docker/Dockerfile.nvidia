@@ -13,6 +13,7 @@ ENV DVR_PORT=7070
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=video,compute,utility
 ENV DVR_HW_ACCEL=nvenc
+ENV DVR_IMAGE=sunnyside1/directvtuner:nvidia-multi
 
 # Install base packages (without ffmpeg - we'll install a custom one)
 RUN apt-get update && apt-get install -y \
@@ -98,6 +99,7 @@ COPY start-vnc.sh /usr/local/bin/start-vnc.sh
 COPY start-novnc.sh /usr/local/bin/start-novnc.sh
 COPY start-dvr.sh /usr/local/bin/start-dvr.sh
 COPY start-pulseaudio.sh /usr/local/bin/start-pulseaudio.sh
+COPY start-unclutter.sh /usr/local/bin/start-unclutter.sh
 RUN chmod +x /usr/local/bin/*.sh
 
 # Configure PulseAudio for system-wide mode

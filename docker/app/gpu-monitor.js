@@ -33,12 +33,17 @@ class GPUMonitor {
       return;
     }
 
-    // Check for Intel GPU (future)
+    // Check for Intel GPU
     const intel = await this.detectIntel();
     if (intel) {
       this.type = 'intel';
       this.available = true;
-      console.log(`[gpu-monitor] Intel GPU detected`);
+      console.log(`[gpu-monitor] Intel GPU detected: ${intel.name}`);
+      console.log(`[gpu-monitor] VA-API supported: ${intel.vapiSupported}`);
+      console.log(`[gpu-monitor] Driver: ${intel.driverVersion || 'Unknown'}`);
+
+      // Start periodic monitoring
+      this.startMonitoring();
       return;
     }
 
@@ -96,25 +101,121 @@ class GPUMonitor {
   }
 
   /**
-   * Detect Intel GPU (placeholder for future)
+   * Detect Intel GPU using vainfo
    */
   async detectIntel() {
-    // Check for Intel GPU using vainfo or similar
     return new Promise((resolve) => {
-      exec('ls /dev/dri/renderD* 2>/dev/null', { timeout: 2000 }, (error, stdout) => {
+      // Check for Intel GPU using lspci
+      exec('lspci | grep -i "vga.*intel"', { timeout: 2000 }, (error, stdout) => {
         if (error || !stdout.trim()) {
           resolve(null);
           return;
         }
 
-        // Check if it's Intel specifically
-        exec('lspci | grep -i "vga.*intel"', { timeout: 2000 }, (error2, stdout2) => {
-          if (!error2 && stdout2.trim()) {
-            resolve({ type: 'intel', device: stdout.trim().split('\n')[0] });
-          } else {
+        const gpuName = stdout.trim().split(':').pop()?.trim() || 'Intel GPU';
+
+        // Check for render device
+        exec('ls /dev/dri/renderD* 2>/dev/null', { timeout: 2000 }, (error2, stdout2) => {
+          if (error2 || !stdout2.trim()) {
             resolve(null);
+            return;
           }
+
+          const renderDevice = stdout2.trim().split('\n')[0];
+
+          // Try to get VA-API info
+          exec('vainfo 2>&1', { timeout: 5000 }, async (error3, stdout3) => {
+            const info = {
+              name: gpuName,
+              renderDevice: renderDevice,
+              vapiSupported: false,
+              profiles: [],
+              utilization: { render: 0, video: 0, videoEnhance: 0 }
+            };
+
+            if (!error3 && stdout3) {
+              // Parse vainfo output
+              if (stdout3.includes('VAProfileH264')) {
+                info.vapiSupported = true;
+                const profileMatches = stdout3.match(/VAProfile\w+/g);
+                if (profileMatches) {
+                  info.profiles = [...new Set(profileMatches)].slice(0, 10);
+                }
+              }
+              // Get driver info
+              const driverMatch = stdout3.match(/Driver version:\s*(.+)/);
+              if (driverMatch) {
+                info.driverVersion = driverMatch[1].trim();
+              }
+            }
+
+            // Get utilization from intel_gpu_top
+            const util = await this.getIntelUtilization();
+            if (util) {
+              info.utilization = util;
+            }
+
+            this.gpuInfo = info;
+            this.lastUpdate = Date.now();
+            resolve(info);
+          });
         });
+      });
+    });
+  }
+
+  /**
+   * Get Intel GPU utilization using intel_gpu_top
+   */
+  async getIntelUtilization() {
+    return new Promise((resolve) => {
+      // Run for 3 seconds with 1 second samples to get stable readings
+      // Use -l 1 to get a single JSON object output
+      exec('timeout 3 intel_gpu_top -J -s 1000 2>/dev/null', { timeout: 5000 }, (error, stdout) => {
+        if (error || !stdout.trim()) {
+          resolve(null);
+          return;
+        }
+        try {
+          // The output is multi-line JSON objects separated by newlines
+          // Find complete JSON objects by matching braces
+          const output = stdout.trim();
+          let lastUtil = null;
+          let braceCount = 0;
+          let jsonStart = -1;
+
+          for (let i = 0; i < output.length; i++) {
+            if (output[i] === '{') {
+              if (braceCount === 0) jsonStart = i;
+              braceCount++;
+            } else if (output[i] === '}') {
+              braceCount--;
+              if (braceCount === 0 && jsonStart >= 0) {
+                // Found complete JSON object
+                try {
+                  const jsonStr = output.substring(jsonStart, i + 1);
+                  const data = JSON.parse(jsonStr);
+                  if (data.engines) {
+                    const util = { render: 0, video: 0, videoEnhance: 0 };
+                    // Engine names are keys like "Render/3D/0", "Video/0", "VideoEnhance/0"
+                    for (const [name, engine] of Object.entries(data.engines)) {
+                      if (name.startsWith('Render/3D')) util.render = Math.round(engine.busy || 0);
+                      else if (name.startsWith('Video/') && !name.startsWith('VideoEnhance')) util.video = Math.round(engine.busy || 0);
+                      else if (name.startsWith('VideoEnhance')) util.videoEnhance = Math.round(engine.busy || 0);
+                    }
+                    lastUtil = util;
+                  }
+                } catch (parseErr) {
+                  // Skip malformed JSON
+                }
+                jsonStart = -1;
+              }
+            }
+          }
+          resolve(lastUtil);
+        } catch (e) {
+          resolve(null);
+        }
       });
     });
   }
@@ -127,6 +228,8 @@ class GPUMonitor {
     this.updateInterval = setInterval(async () => {
       if (this.type === 'nvidia') {
         await this.detectNvidia();
+      } else if (this.type === 'intel') {
+        await this.detectIntel();
       }
     }, 5000);
   }
@@ -191,15 +294,23 @@ class GPUMonitor {
       }
     }
 
-    if (this.type === 'intel') {
+    if (this.type === 'intel' && this.gpuInfo) {
       status.intel = {
-        available: true,
-        // Add more Intel-specific info in future
+        name: this.gpuInfo.name,
+        renderDevice: this.gpuInfo.renderDevice,
+        driverVersion: this.gpuInfo.driverVersion || 'Unknown',
+        vapiSupported: this.gpuInfo.vapiSupported,
+        profiles: this.gpuInfo.profiles || [],
+        utilization: {
+          render: this.gpuInfo.utilization?.render || 0,
+          video: this.gpuInfo.utilization?.video || 0,
+          videoEnhance: this.gpuInfo.utilization?.videoEnhance || 0,
+        },
       };
 
-      if (hwAccel === 'qsv') {
-        status.qsvSettings = {
-          preset: config.qsv?.preset || 'fast',
+      if (hwAccel === 'vaapi') {
+        status.vaapiSettings = {
+          device: '/dev/dri/renderD128',
         };
       }
     }
@@ -223,6 +334,32 @@ class GPUMonitor {
               error: output.includes('Cannot load') ? 'NVENC library not found' :
                      output.includes('No NVENC capable devices') ? 'No NVENC capable GPU' :
                      'NVENC test failed'
+            });
+          } else {
+            resolve({ working: true });
+          }
+        }
+      );
+    });
+  }
+
+  /**
+   * Check if QSV is available and working
+   */
+  async testQsv() {
+    return new Promise((resolve) => {
+      // Try to run a quick QSV test
+      exec('ffmpeg -init_hw_device qsv=qsv:hw -f lavfi -i testsrc=duration=1:size=320x240:rate=30 -c:v h264_qsv -f null - 2>&1',
+        { timeout: 10000 },
+        (error, stdout, stderr) => {
+          const output = stdout + stderr;
+          if (error) {
+            resolve({
+              working: false,
+              error: output.includes('Cannot load') ? 'QSV library not found' :
+                     output.includes('No device') ? 'No QSV capable GPU' :
+                     output.includes('MFX') ? 'Intel Media SDK error' :
+                     'QSV test failed'
             });
           } else {
             resolve({ working: true });

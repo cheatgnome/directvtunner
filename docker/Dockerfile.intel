@@ -1,3 +1,5 @@
+# Intel QSV GPU-accelerated DirecTV Tuner
+# Uses Quick Sync Video (QSV) for hardware-accelerated H.264 encoding
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -6,7 +8,11 @@ ENV VNC_PORT=5901
 ENV NOVNC_PORT=6080
 ENV CHROME_DEBUG_PORT=9222
 ENV DVR_PORT=7070
-ENV DVR_IMAGE=sunnyside1/directvtuner:latest
+
+# Hardware acceleration environment for Intel VAAPI
+ENV LIBVA_DRIVER_NAME=iHD
+ENV DVR_HW_ACCEL=vaapi
+ENV DVR_IMAGE=sunnyside1/directvtuner:intel-vaapi
 
 # Install base packages
 RUN apt-get update && apt-get install -y \
@@ -23,7 +29,6 @@ RUN apt-get update && apt-get install -y \
     git \
     python3 \
     python3-pip \
-    ffmpeg \
     pulseaudio \
     unclutter \
     dbus-x11 \
@@ -40,7 +45,23 @@ RUN apt-get update && apt-get install -y \
     libxcb-dri3-0 \
     libdrm2 \
     libxshmfence1 \
+    xz-utils \
+    # Intel GPU drivers and VA-API
+    vainfo \
+    intel-media-va-driver-non-free \
+    libmfx1 \
+    libva-drm2 \
+    libva-x11-2 \
     && rm -rf /var/lib/apt/lists/*
+
+# Install FFmpeg with VAAPI/QSV support from Ubuntu repos
+# Also install pciutils for GPU detection and intel-gpu-tools for monitoring
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    pciutils \
+    intel-gpu-tools \
+    && rm -rf /var/lib/apt/lists/* \
+    && ffmpeg -version
 
 # Install Node.js 20.x
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \

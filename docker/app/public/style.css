@@ -388,6 +388,68 @@ header .subtitle {
   color: #fff;
 }
 
+.btn-tiny {
+  background: #333;
+  border: none;
+  color: #ccc;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.btn-tiny:hover {
+  background: #444;
+  color: #fff;
+}
+
+.btn-vnc-tuner {
+  background: #1e3a5f;
+  color: #93c5fd;
+}
+
+.btn-vnc-tuner:hover {
+  background: #2563eb;
+  color: #fff;
+}
+
+.btn-reset-tuner {
+  background: #4a4a4a;
+  color: #ccc;
+  font-size: 14px;
+  padding: 2px 6px;
+}
+
+.btn-reset-tuner:hover {
+  background: #b91c1c;
+  color: #fff;
+}
+
+.tuner-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.login-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.login-dot.logged-in {
+  background: #22c55e;
+  box-shadow: 0 0 4px #22c55e;
+}
+
+.login-dot.needs-login {
+  background: #ef4444;
+  box-shadow: 0 0 4px #ef4444;
+}
+
 .btn-danger {
   background: #991b1b;
   color: #fca5a5;
@@ -997,4 +1059,40 @@ header .subtitle {
   padding: 2px 6px;
   border-radius: 4px;
   color: #60a5fa;
+}
+
+/* Tuner Legend */
+.tuner-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  background: #1a1a2e;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-icon {
+  font-size: 0.7rem;
+  color: #666;
+  font-weight: 600;
+}
+
+.btn-cache-tuner {
+  background: #4a4a4a;
+  color: #ccc;
+  font-size: 0.7rem;
+}
+
+.btn-cache-tuner:hover {
+  background: #f59e0b;
+  color: #000;
 }

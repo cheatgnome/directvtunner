@@ -243,11 +243,12 @@ function settingsApp() {
       }, 3000);
     },
 
-    // noVNC
-    openVNC() {
-      // Get the current host (assumes noVNC is on port 6080 of the same server)
+    // noVNC - supports multiple tuners with different ports
+    openVNC(tunerId = 0) {
+      // Each tuner has its own noVNC port: 6080, 6081, 6082, etc.
       const host = window.location.hostname;
-      const vncUrl = `http://${host}:6080/vnc.html?autoconnect=true`;
+      const port = 6080 + tunerId;
+      const vncUrl = `http://${host}:${port}/vnc.html?autoconnect=true`;
       window.open(vncUrl, '_blank');
     },
 
@@ -368,7 +369,9 @@ function settingsApp() {
             channelName: t.channelName || '',
             state: t.state,
             uptime: t.stream?.uptimeFormatted || '',
-            bytes: t.stream?.bytesFormatted || ''
+            bytes: t.stream?.bytesFormatted || '',
+            loggedIn: t.login?.isLoggedIn || false,
+            needsLogin: t.login?.needsLogin || false
           }));
           const activeCount = tunerList.filter(t => t.streaming).length;
           this.systemStatus.tuners = {
@@ -456,6 +459,41 @@ function settingsApp() {
         this.showToast('Failed to reset streams', 'error');
       } finally {
         this.resettingStreams = false;
+      }
+    },
+
+    async resetTuner(tunerId) {
+      try {
+        const res = await fetch(`/api/tuner/${tunerId}/reset`, { method: 'POST' });
+        if (res.ok) {
+          this.showToast(`Tuner ${tunerId} reset successfully`, 'success');
+          setTimeout(() => this.loadStatus(), 500);
+        } else {
+          const err = await res.json();
+          this.showToast(err.error || `Failed to reset tuner ${tunerId}`, 'error');
+        }
+      } catch (err) {
+        console.error(`Failed to reset tuner ${tunerId}:`, err);
+        this.showToast(`Failed to reset tuner ${tunerId}`, 'error');
+      }
+    },
+
+    async clearCache(tunerId) {
+      if (!confirm(`Clear Chrome cache for Tuner ${tunerId}? This helps fix "streaming limit" errors. You may need to log in again.`)) {
+        return;
+      }
+      try {
+        const res = await fetch(`/api/tuner/${tunerId}/clear-cache`, { method: 'POST' });
+        if (res.ok) {
+          const data = await res.json();
+          this.showToast(data.message || `Cache cleared for Tuner ${tunerId}`, 'success');
+        } else {
+          const err = await res.json();
+          this.showToast(err.error || `Failed to clear cache for Tuner ${tunerId}`, 'error');
+        }
+      } catch (err) {
+        console.error(`Failed to clear cache for tuner ${tunerId}:`, err);
+        this.showToast(`Failed to clear cache for Tuner ${tunerId}`, 'error');
       }
     },
 

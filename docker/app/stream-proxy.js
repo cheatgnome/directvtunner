@@ -81,7 +81,7 @@ app.get('/api/version', (req, res) => {
   res.json({
     version: pkg.version || '1.0.0',
     name: pkg.name || 'directv-tuner',
-    image: process.env.DOCKER_IMAGE || 'sunnyside1/directvtuner:latest',
+    image: process.env.DVR_IMAGE || process.env.DOCKER_IMAGE || 'sunnyside1/directvtuner:latest',
     buildDate: process.env.BUILD_DATE || null,
     nodeVersion: process.version,
     platform: os.platform(),
@@ -170,11 +170,28 @@ app.get("/api/status", async (req, res) => {
       }
     } catch (e) {}
     
-    // Enhance tuner info with channel names
-    tunerStatus.tuners = tunerStatus.tuners.map(t => ({
-      ...t,
-      channelName: channelMap[t.channel] ? channelMap[t.channel].name : "",
-      channelFullName: channelMap[t.channel] ? channelMap[t.channel].fullName : ""
+    // Enhance tuner info with channel names and per-tuner login status
+    tunerStatus.tuners = await Promise.all(tunerStatus.tuners.map(async (t) => {
+      // Check login status for this specific tuner
+      let tunerLoginStatus = {
+        isLoggedIn: false,
+        needsLogin: false
+      };
+      try {
+        const tuner = tunerManager.getTuner(t.id);
+        if (tuner && tuner.page) {
+          const url = tuner.page.url();
+          tunerLoginStatus.isLoggedIn = url.includes("stream.directv.com") && !url.includes("login") && !url.includes("signin") && !url.includes("auth");
+          tunerLoginStatus.needsLogin = url.includes("login") || url.includes("signin") || url.includes("auth");
+        }
+      } catch (e) {}
+
+      return {
+        ...t,
+        channelName: channelMap[t.channel] ? channelMap[t.channel].name : "",
+        channelFullName: channelMap[t.channel] ? channelMap[t.channel].fullName : "",
+        login: tunerLoginStatus
+      };
     }));
 
     // System ready status
@@ -565,7 +582,7 @@ app.get('/stats', (req, res) => {
   res.json(stats);
 });
 
-// Main stream endpoint - serves MPEG-TS directly for instant playback
+// Main stream endpoint - serves HLS playlist or MPEG-TS depending on mode
 app.get('/stream/:channelId', async (req, res) => {
   const { channelId } = req.params;
   const startTime = Date.now();
@@ -573,7 +590,12 @@ app.get('/stream/:channelId', async (req, res) => {
 
   log(`Stream request for ${channelId}`);
 
-  const channel = getChannel(channelId);
+  // Try to find channel in static channels.js first, then fall back to EPG data
+  let channel = getChannel(channelId);
+  if (!channel) {
+    // Try EPG data for dynamically discovered channels (like locals)
+    channel = directvEpg.getChannelByNumber(channelId);
+  }
   if (!channel) {
     return res.status(404).json({ error: `Unknown channel: ${channelId}` });
   }
@@ -612,6 +634,38 @@ app.get('/stream/:channelId', async (req, res) => {
     // Update activity
     tuner.lastActivity = Date.now();
 
+    // Check if using HLS mode (better for multiple clients)
+    if (tuner.ffmpeg && tuner.ffmpeg.isHlsMode()) {
+      log('Using HLS mode - waiting for playlist...');
+
+      // Wait for HLS playlist to be ready (first segments generated)
+      // HLS needs ~4-6 seconds to generate first segment
+      let hlsWait = 0;
+      const maxHlsWait = 20000; // 20 seconds for first segments
+      while (!tuner.ffmpeg.isHlsReady() && hlsWait < maxHlsWait) {
+        await new Promise(r => setTimeout(r, 500));
+        hlsWait += 500;
+        if (hlsWait % 5000 === 0) {
+          log(`Still waiting for HLS playlist... (${hlsWait/1000}s)`);
+        }
+      }
+
+      if (!tuner.ffmpeg.isHlsReady()) {
+        log('HLS playlist not ready after 20s, returning error');
+        return res.status(503).json({
+          error: 'Stream not ready',
+          message: 'HLS segments still generating, please retry in a few seconds'
+        });
+      }
+
+      // Redirect to HLS playlist
+      const host = req.headers.host || `${config.host}:${config.port}`;
+      const hlsUrl = `http://${host}/tuner/${tuner.id}/stream.m3u8`;
+      log(`Redirecting to HLS: ${hlsUrl}`);
+      return res.redirect(302, hlsUrl);
+    }
+
+    // MPEG-TS pipe mode (only when HLS is disabled)
     // Set MPEG-TS headers for streaming
     res.setHeader('Content-Type', 'video/mp2t');
     res.setHeader('Cache-Control', 'no-cache, no-store');
@@ -690,6 +744,12 @@ app.get('/tuner/:tunerId/stream.m3u8', async (req, res) => {
   // Handle init.mp4 in EXT-X-MAP tag: #EXT-X-MAP:URI="init.mp4"
   playlist = playlist.replace(/URI="(init\.mp4)"/g, `URI="http://${host}/tuner/${tunerId}/$1"`);
 
+  // Add EXT-X-START to force players to start near live edge (reduces stuttering on resume)
+  // TIME-OFFSET=-3 means start 3 seconds before live edge
+  if (!playlist.includes('#EXT-X-START')) {
+    playlist = playlist.replace('#EXTM3U', '#EXTM3U\n#EXT-X-START:TIME-OFFSET=-3,PRECISE=YES');
+  }
+
   res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
   res.setHeader('Cache-Control', 'no-cache, no-store');
   res.send(playlist);
@@ -747,6 +807,114 @@ app.post('/tuner/:tunerId/force-release', async (req, res) => {
   const { tunerId } = req.params;
   await tunerManager.releaseTuner(tunerId);
   res.json({ success: true });
+});
+
+// Reset a single tuner (kill its FFmpeg and reset state)
+app.post('/api/tuner/:tunerId/reset', async (req, res) => {
+  const tunerId = parseInt(req.params.tunerId);
+  try {
+    const tuner = tunerManager.getTuner(tunerId);
+    if (!tuner) {
+      return res.status(404).json({ error: `Tuner ${tunerId} not found` });
+    }
+
+    // Stop the FFmpeg capture for this tuner
+    if (tuner.ffmpegCapture) {
+      tuner.ffmpegCapture.stop();
+    }
+
+    // Release the tuner
+    await tunerManager.releaseTuner(tunerId);
+
+    console.log(`[server] Tuner ${tunerId} reset via API`);
+    res.json({ success: true, message: `Tuner ${tunerId} reset successfully` });
+  } catch (err) {
+    console.error(`[server] Failed to reset tuner ${tunerId}:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Clear Chrome cache for a tuner AND restart Chrome (fixes DirecTV "streaming limit" errors)
+app.post('/api/tuner/:tunerId/clear-cache', async (req, res) => {
+  const tunerId = parseInt(req.params.tunerId);
+  const numTuners = parseInt(process.env.DVR_NUM_TUNERS) || 1;
+
+  if (tunerId < 0 || tunerId >= numTuners) {
+    return res.status(400).json({ error: `Invalid tuner ID: ${tunerId}` });
+  }
+
+  try {
+    const { execSync, spawn } = require('child_process');
+    const profileDir = `/data/chrome-profile-${tunerId}`;
+    const debugPort = 9222 + tunerId;
+    const displayNum = tunerId + 1;
+
+    // 1. Kill Chrome for this specific tuner
+    try {
+      execSync(`pkill -9 -f "chrome-profile-${tunerId}"`, { timeout: 5000 });
+      console.log(`[server] Killed Chrome for tuner ${tunerId}`);
+    } catch (e) {
+      // Chrome might not be running for this tuner
+    }
+
+    // Wait for Chrome to fully terminate
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // 2. Clear cache directories
+    const cacheDirs = [
+      `${profileDir}/Default/Cache`,
+      `${profileDir}/Default/Code Cache`,
+      `${profileDir}/Default/GPUCache`,
+      `${profileDir}/Default/Service Worker`,
+    ];
+
+    for (const dir of cacheDirs) {
+      try {
+        execSync(`rm -rf "${dir}"`, { timeout: 5000 });
+      } catch (e) {
+        // Directory might not exist, that's fine
+      }
+    }
+    console.log(`[server] Cleared Chrome cache for tuner ${tunerId}`);
+
+    // 3. Restart Chrome for this tuner
+    const chromeArgs = [
+      `--remote-debugging-port=${debugPort}`,
+      '--remote-debugging-address=0.0.0.0',
+      `--user-data-dir=${profileDir}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-translate',
+      '--disable-gpu',
+      '--window-size=1920,1080',
+      '--window-position=0,0',
+      '--kiosk',
+      '--autoplay-policy=no-user-gesture-required',
+      '--disable-dev-shm-usage',
+      '--no-sandbox',
+      '--alsa-output-device=pulse',
+      'https://stream.directv.com'
+    ];
+
+    const chrome = spawn('/usr/bin/google-chrome-stable', chromeArgs, {
+      env: { ...process.env, DISPLAY: `:${displayNum}` },
+      detached: true,
+      stdio: 'ignore'
+    });
+    chrome.unref();
+
+    console.log(`[server] Restarted Chrome for tuner ${tunerId} on display :${displayNum}, debug port ${debugPort}`);
+
+    res.json({
+      success: true,
+      message: `Cache cleared and Chrome restarted for tuner ${tunerId}. You may need to log in again.`
+    });
+  } catch (err) {
+    console.error(`[server] Failed to clear cache for tuner ${tunerId}:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Kill all FFmpeg processes (emergency reset)
