@@ -62,8 +62,17 @@ docker pull sunnyside1/directvtuner:intel-vaapi
 
 All GPU images support multi-tuner via the `DVR_NUM_TUNERS` environment variable:
 - Set `DVR_NUM_TUNERS=3` for 3 simultaneous tuners
-- Each tuner runs its own Chrome instance
+- Each tuner runs its own Chrome instance and Xvfb display
+- Each tuner has its own noVNC port (6080, 6081, 6082)
 - Requires separate DirecTV login per tuner (via VNC)
+
+### Auto-Recovery
+
+All images include automatic recovery from Chrome crashes:
+- Detects stale CDP (Chrome DevTools Protocol) connections
+- Automatically reconnects with exponential backoff
+- Periodic health checks every 30 seconds
+- No manual container reboots needed
 
 ---
 
@@ -237,17 +246,41 @@ services:
 ### Docker Run with NVIDIA GPU
 
 ```bash
+# Single tuner
 docker run -d \
   --name dvr-tuner-nvidia \
   --runtime=nvidia \
+  --gpus all \
   -e NVIDIA_VISIBLE_DEVICES=all \
   -e NVIDIA_DRIVER_CAPABILITIES=video,compute,utility \
   -p 7070:7070 \
   -p 6080:6080 \
-  -p 9222:9222 \
-  -v ./chrome-profile:/data/chrome-profile \
-  sunnyside1/directvtuner:nvidia
+  -v ./dvr-data:/data \
+  -e TZ=America/New_York \
+  sunnyside1/directvtuner:nvidia-multi
+
+# Multi-tuner (3 tuners)
+docker run -d \
+  --name dvr-tuner-nvidia \
+  --runtime=nvidia \
+  --gpus all \
+  --shm-size=2g \
+  -e NVIDIA_VISIBLE_DEVICES=all \
+  -e NVIDIA_DRIVER_CAPABILITIES=video,compute,utility \
+  -p 7070:7070 \
+  -p 6080:6080 \
+  -p 6081:6081 \
+  -p 6082:6082 \
+  -v ./dvr-data:/data \
+  -e TZ=America/New_York \
+  -e DVR_NUM_TUNERS=3 \
+  sunnyside1/directvtuner:nvidia-multi
 ```
+
+**Multi-tuner login:**
+- Tuner 0: `http://YOUR_IP:6080`
+- Tuner 1: `http://YOUR_IP:6081`
+- Tuner 2: `http://YOUR_IP:6082`
 
 ### NVENC Settings (Environment Variables)
 
@@ -298,11 +331,10 @@ docker run -d \
   --name dvr-tuner-intel \
   --privileged \
   --device /dev/dri:/dev/dri \
-  -e DVR_HW_ACCEL=vaapi \
   -p 7070:7070 \
   -p 6080:6080 \
-  -p 5901:5901 \
   -v ./dvr-data:/data \
+  -e TZ=America/New_York \
   sunnyside1/directvtuner:intel-vaapi
 
 # Multi-tuner (3 tuners)
@@ -310,14 +342,20 @@ docker run -d \
   --name dvr-tuner-intel \
   --privileged \
   --device /dev/dri:/dev/dri \
-  -e DVR_NUM_TUNERS=3 \
-  -e DVR_HW_ACCEL=vaapi \
   -p 7070:7070 \
   -p 6080:6080 \
-  -p 5901:5901 \
+  -p 6081:6081 \
+  -p 6082:6082 \
   -v ./dvr-data:/data \
+  -e TZ=America/New_York \
+  -e DVR_NUM_TUNERS=3 \
   sunnyside1/directvtuner:intel-vaapi
 ```
+
+**Multi-tuner login:**
+- Tuner 0: `http://YOUR_IP:6080`
+- Tuner 1: `http://YOUR_IP:6081`
+- Tuner 2: `http://YOUR_IP:6082`
 
 ### Docker Compose with Intel VA-API
 
