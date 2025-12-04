@@ -323,10 +323,11 @@ class Tuner {
       throw new Error('Tuner not started');
     }
 
-    let channel = getChannel(channelId);
+    // Prioritize EPG data (dynamic, up-to-date channel names) over static channels.js
+    let channel = directvEpg.getChannelByNumber(channelId);
     if (!channel) {
-      // Try EPG data for dynamically discovered channels (like locals)
-      channel = directvEpg.getChannelByNumber(channelId);
+      // Fall back to static channel definitions
+      channel = getChannel(channelId);
     }
     if (!channel) {
       throw new Error(`Unknown channel: ${channelId}`);
@@ -548,7 +549,10 @@ class Tuner {
       }
 
       if (!clicked.clicked) {
-        console.log(`[tuner-${this.id}] Could not find channel ${channel.name} in guide`);
+        console.log(`[tuner-${this.id}] Could not find channel ${channel.name} in guide, trying search...`);
+
+        // Fallback: Use search box to find channel
+        clicked = await this.searchAndTuneChannel(channel);
       }
 
       // Check for "No upcoming airings" modal before looking for play button
@@ -684,6 +688,31 @@ class Tuner {
             }
           }
 
+          // Method 6: Click on "What's Playing Now" program cell in the guide
+          // These cells have aria-label like "Movie | 2017, 187 of 5" and clicking opens player directly
+          const programCells = document.querySelectorAll('[aria-label*=" of "]');
+          for (const cell of programCells) {
+            const ariaLabel = cell.getAttribute('aria-label') || '';
+            // Look for program cells (contain " of " which indicates position in guide)
+            // and have content like "Movie | 2017" or show info
+            if (ariaLabel.match(/\d+ of \d+/)) {
+              cell.click();
+              return { clicked: true, method: 'program-cell: ' + ariaLabel.substring(0, 50) };
+            }
+          }
+
+          // Method 7: Click on first clickable program element in the currently selected channel row
+          // Look for elements with height: 80px which are the program cells
+          const programElements = document.querySelectorAll('div[style*="height: 80px"]');
+          for (const el of programElements) {
+            // Check if this element is clickable and has program content
+            const hasContent = el.querySelector('[class*="css-901oao"]');
+            if (hasContent && el.closest('[class*="r-1loqt21"]')) {
+              el.click();
+              return { clicked: true, method: 'program-element-80px' };
+            }
+          }
+
           return { clicked: false };
         });
 
@@ -732,6 +761,124 @@ class Tuner {
 
     console.log(`[tuner-${this.id}] Guide wait timed out after ${maxWait}ms, proceeding anyway`);
     return false;
+  }
+
+  async searchAndTuneChannel(channel) {
+    console.log(`[tuner-${this.id}] Using search to find channel ${channel.name}...`);
+
+    try {
+      // Find and click the search input box
+      const searchBoxFound = await this.page.evaluate(() => {
+        const searchInput = document.querySelector('input[placeholder*="TV Shows"], input[placeholder*="Keywords"], input[enterkeyhint="search"]');
+        if (searchInput) {
+          searchInput.click();
+          searchInput.focus();
+          return true;
+        }
+        return false;
+      });
+
+      if (!searchBoxFound) {
+        console.log(`[tuner-${this.id}] Search box not found`);
+        return { clicked: false };
+      }
+
+      // Clear any existing text and type the channel name
+      await this.page.keyboard.press('Control+a');
+      await new Promise(r => setTimeout(r, 100));
+
+      // Use a simpler search term - just the key word from channel name
+      const searchTerm = channel.name.split(' ')[0];  // e.g., "Cinemax" from "Cinemax Hits HD"
+      console.log(`[tuner-${this.id}] Typing search term: ${searchTerm}`);
+      await this.page.keyboard.type(searchTerm, { delay: 50 });
+
+      // Press Enter to search
+      await this.page.keyboard.press('Enter');
+
+      // Wait for search results
+      await new Promise(r => setTimeout(r, 2000));
+
+      // Try to click "View All" to see all results
+      const viewAllClicked = await this.page.evaluate(() => {
+        const viewAllLinks = Array.from(document.querySelectorAll('*')).filter(el =>
+          el.textContent && el.textContent.trim() === 'View All'
+        );
+        for (const link of viewAllLinks) {
+          const clickable = link.closest('[role="button"], [role="link"], a') || link;
+          clickable.click();
+          return true;
+        }
+        return false;
+      });
+
+      if (viewAllClicked) {
+        console.log(`[tuner-${this.id}] Clicked View All, waiting for search results page...`);
+        await new Promise(r => setTimeout(r, 2000));
+      }
+
+      // Now find and click the channel card with the matching name
+      const channelClicked = await this.page.evaluate((channelName) => {
+        const channelLower = channelName.toLowerCase();
+
+        // Find all channel cards - they have the channel name and "Tune to Channel" text
+        const allElements = document.querySelectorAll('*');
+
+        for (const el of allElements) {
+          const text = (el.textContent || '').toLowerCase();
+
+          // Check if this element contains our channel name AND "tune to channel"
+          if (text.includes(channelLower) ||
+              (channelLower.includes('hits') && text.includes('hits hd')) ||
+              (channelLower.includes('cinemax') && text.includes(channelLower.replace(' ', '')))) {
+
+            // Look for a clickable card container
+            const card = el.closest('[class*="r-1loqt21"], [role="button"], [role="link"]');
+            if (card && card.textContent.toLowerCase().includes('tune to channel')) {
+              // Try to find the play button (SVG with play icon) or click the card
+              const playBtn = card.querySelector('svg, [class*="play"]');
+              if (playBtn) {
+                const playContainer = playBtn.closest('[role="button"]') || playBtn.parentElement;
+                playContainer.click();
+                return { clicked: true, method: `search: play button on "${channelName}"` };
+              }
+              card.click();
+              return { clicked: true, method: `search: card for "${channelName}"` };
+            }
+          }
+        }
+
+        // Alternative: Look specifically for channel name header with Tune to Channel
+        const headers = document.querySelectorAll('div');
+        for (const header of headers) {
+          const headerText = header.textContent || '';
+          if (headerText.includes(channelName) ||
+              (channelName.includes('Hits') && headerText.includes('Hits HD'))) {
+            // Found channel name, look for nearby Tune to Channel
+            const parent = header.closest('div[class*="r-"]');
+            if (parent) {
+              const tuneText = parent.querySelector('*');
+              if (parent.textContent.includes('Tune to Channel')) {
+                parent.click();
+                return { clicked: true, method: `search: header card "${channelName}"` };
+              }
+            }
+          }
+        }
+
+        return { clicked: false };
+      }, channel.name);
+
+      if (channelClicked.clicked) {
+        console.log(`[tuner-${this.id}] ${channelClicked.method}`);
+      } else {
+        console.log(`[tuner-${this.id}] Could not find channel in search results`);
+      }
+
+      return channelClicked;
+    } catch (err) {
+      console.log(`[tuner-${this.id}] Search failed: ${err.message}`);
+      return { clicked: false };
+    }
   }
 
   async waitForVideoPlaying() {

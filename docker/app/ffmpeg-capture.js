@@ -138,6 +138,15 @@ class FFmpegCapture {
       // HLS settings from user config
       this.hlsSegmentTime = settings.hls?.segmentTime || config.hls?.segmentTime || 4;
       this.hlsListSize = settings.hls?.listSize || config.hls?.listSize || 6;
+      // Encoding settings from user config (with defaults)
+      const encSettings = settings.encoding || {};
+      const bufferSize = encSettings.bufferSize || '8M';
+      const threadQueueSize = encSettings.threadQueueSize || 2048;
+      const probeSize = encSettings.probeSize || '10M';
+      const drawMouse = encSettings.drawMouse ?? false;
+      const vsyncMode = encSettings.vsync || 'cfr';
+      const gopSize = encSettings.gopSize || 60;
+      const lowLatency = encSettings.lowLatency ?? true;
       // Use instance hwAccel which may have been downgraded from NVENC to none
       // hwAccel comes from config (env var), not user settings
       const hwAccel = this.useHwAccel;
@@ -147,6 +156,7 @@ class FFmpegCapture {
 
       console.log(`[ffmpeg-${this.tunerId}] Using settings: ${width}x${height} @ ${videoBitrate} video, ${audioBitrate} audio`);
       console.log(`[ffmpeg-${this.tunerId}] Encoder: ${encoder} (hwAccel: ${hwAccel})${this.hwAccelFailed ? ' [HW accel failed, using software fallback]' : ''}`);
+      console.log(`[ffmpeg-${this.tunerId}] Encoding: buffer=${bufferSize}, queue=${threadQueueSize}, vsync=${vsyncMode}, gop=${gopSize}`);
       this.stats.encoder = encoder;
 
       // Build video encoder arguments based on hardware acceleration
@@ -171,8 +181,8 @@ class FFmpegCapture {
           '-pix_fmt', 'yuv420p',
           '-b:v', videoBitrate,
           '-maxrate', videoBitrate,
-          '-bufsize', '2M',
-          '-g', '60',
+          '-bufsize', bufferSize,
+          '-g', String(gopSize),
           '-bf', String(nvencBframes),
           '-flags', '+cgop',
         ];
@@ -195,8 +205,8 @@ class FFmpegCapture {
           '-pix_fmt', 'nv12',
           '-b:v', videoBitrate,
           '-maxrate', videoBitrate,
-          '-bufsize', '2M',
-          '-g', '60',
+          '-bufsize', bufferSize,
+          '-g', String(gopSize),
           '-bf', '0',
           '-flags', '+cgop',
         ];
@@ -210,46 +220,47 @@ class FFmpegCapture {
           '-level', '4.1',
           '-b:v', videoBitrate,
           '-maxrate', videoBitrate,
-          '-bufsize', '12M',
-          '-g', '60',
+          '-bufsize', bufferSize,
+          '-g', String(gopSize),
           '-bf', '0',
         ];
       } else {
         // Software encoding (libx264)
+        const x264Tune = lowLatency ? 'zerolatency' : 'film';
         if (config.lowResourceFFmpeg) {
           // Low resource mode: faster encoding, less CPU
           console.log(`[ffmpeg-${this.tunerId}] Low resource FFmpeg mode: superfast preset, reduced quality`);
           videoEncoderArgs = [
             '-c:v', 'libx264',
             '-preset', 'superfast',
-            '-tune', 'zerolatency',
+            '-tune', x264Tune,
             '-profile:v', 'main',
             '-level', '4.0',
             '-pix_fmt', 'yuv420p',
             '-crf', '26',
             '-b:v', videoBitrate,
             '-maxrate', videoBitrate,
-            '-bufsize', '1M',
-            '-g', '60',
+            '-bufsize', bufferSize,
+            '-g', String(gopSize),
             '-bf', '0',
             '-refs', '1',
             '-flags', '+cgop',
           ];
         } else {
-          // Standard quality settings (unchanged)
+          // Standard quality settings
           videoEncoderArgs = [
             '-c:v', 'libx264',
             '-preset', 'veryfast',
-            '-tune', 'zerolatency',
+            '-tune', x264Tune,
             '-profile:v', 'high',
             '-level', '4.1',
             '-pix_fmt', 'yuv420p',
             '-crf', '23',
             '-b:v', videoBitrate,
             '-maxrate', videoBitrate,
-            '-bufsize', '2M',
-            '-g', '60',
-            '-keyint_min', '30',
+            '-bufsize', bufferSize,
+            '-g', String(gopSize),
+            '-keyint_min', String(Math.floor(gopSize / 2)),
             '-bf', '2',
             '-b_strategy', '1',
             '-sc_threshold', '40',
@@ -303,13 +314,15 @@ class FFmpegCapture {
 
       args = [
         ...hwInitArgs,
-        '-fflags', '+genpts',
-        '-thread_queue_size', '1024',
+        '-fflags', '+genpts+igndts',
+        '-thread_queue_size', String(threadQueueSize),
+        '-probesize', probeSize,
         '-f', 'x11grab',
         '-framerate', '30',
+        '-draw_mouse', drawMouse ? '1' : '0',
         '-video_size', `${width}x${height}`,
         '-i', `:${displayNum}`,
-        '-thread_queue_size', '1024',
+        '-thread_queue_size', String(threadQueueSize),
         '-f', 'pulse',
         '-ac', '2',
         '-i', audioSink,
@@ -320,7 +333,7 @@ class FFmpegCapture {
         '-ar', '48000',
         '-ac', '2',
         '-af', 'aresample=async=1:min_hard_comp=0.1:first_pts=0',
-        '-vsync', 'cfr',
+        '-vsync', vsyncMode,
         ...outputArgs,
       ];
     }

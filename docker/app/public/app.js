@@ -17,6 +17,15 @@ function settingsApp() {
       },
       tuners: {
         count: 1
+      },
+      encoding: {
+        bufferSize: '8M',
+        threadQueueSize: 2048,
+        probeSize: '10M',
+        drawMouse: false,
+        vsync: 'cfr',
+        gopSize: 60,
+        lowLatency: true
       }
     },
     presets: [],
