@@ -49,24 +49,40 @@ done
 # Give Chrome time to fully stop
 sleep 2
 
-# Copy profile to each tuner
+# Copy ONLY auth-related files (not the whole profile) to each tuner
+# This preserves each tuner's independent session/tab state
+AUTH_FILES="Cookies Cookies-journal Login\ Data Login\ Data-journal Web\ Data Web\ Data-journal"
+AUTH_DIRS="Local\ Storage Session\ Storage IndexedDB"
+
 for i in $(seq 1 $((NUM_TUNERS - 1))); do
     TARGET_PROFILE="/data/chrome-profile-${i}"
 
-    echo "Copying profile to tuner $i..."
+    echo "Copying auth files to tuner $i..."
 
-    # Remove old profile (except lock files which we'll handle)
-    rm -rf "$TARGET_PROFILE"
+    # Create target profile and Default directory if they don't exist
+    mkdir -p "$TARGET_PROFILE/Default"
 
-    # Copy the source profile
-    cp -r "$SOURCE_PROFILE" "$TARGET_PROFILE"
+    # Copy auth files
+    for file in Cookies Cookies-journal "Login Data" "Login Data-journal" "Web Data" "Web Data-journal"; do
+        if [ -f "$SOURCE_PROFILE/Default/$file" ]; then
+            cp "$SOURCE_PROFILE/Default/$file" "$TARGET_PROFILE/Default/" 2>/dev/null || true
+        fi
+    done
+
+    # Copy auth directories
+    for dir in "Local Storage" "Session Storage" "IndexedDB"; do
+        if [ -d "$SOURCE_PROFILE/Default/$dir" ]; then
+            rm -rf "$TARGET_PROFILE/Default/$dir" 2>/dev/null
+            cp -r "$SOURCE_PROFILE/Default/$dir" "$TARGET_PROFILE/Default/" 2>/dev/null || true
+        fi
+    done
 
     # Remove lock files that would prevent Chrome from starting
     rm -f "$TARGET_PROFILE/SingletonLock" \
           "$TARGET_PROFILE/SingletonCookie" \
           "$TARGET_PROFILE/SingletonSocket" 2>/dev/null
 
-    echo "  -> Copied to $TARGET_PROFILE"
+    echo "  -> Copied auth files to $TARGET_PROFILE"
 done
 
 echo ""

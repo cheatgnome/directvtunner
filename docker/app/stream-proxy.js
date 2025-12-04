@@ -952,13 +952,58 @@ app.post('/api/sync-profiles', async (req, res) => {
     // Wait for Chrome to stop
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // Copy profile to each tuner
+    // Copy ONLY auth-related files (not the whole profile) to each tuner
+    // This preserves each tuner's independent session/tab state
+    const authFiles = [
+      'Default/Cookies',
+      'Default/Cookies-journal',
+      'Default/Login Data',
+      'Default/Login Data-journal',
+      'Default/Web Data',
+      'Default/Web Data-journal'
+    ];
+    const authDirs = [
+      'Default/Local Storage',
+      'Default/Session Storage',
+      'Default/IndexedDB'
+    ];
+
     for (let i = 1; i < numTuners; i++) {
       const targetProfile = `/data/chrome-profile-${i}`;
 
-      // Remove old profile and copy new one
-      execSync(`rm -rf "${targetProfile}"`, { timeout: 10000 });
-      execSync(`cp -r "${sourceProfile}" "${targetProfile}"`, { timeout: 30000 });
+      // Create target profile and Default directory if they don't exist
+      if (!fs.existsSync(targetProfile)) {
+        fs.mkdirSync(targetProfile, { recursive: true });
+      }
+      if (!fs.existsSync(`${targetProfile}/Default`)) {
+        fs.mkdirSync(`${targetProfile}/Default`, { recursive: true });
+      }
+
+      // Copy auth files
+      for (const file of authFiles) {
+        const src = `${sourceProfile}/${file}`;
+        const dst = `${targetProfile}/${file}`;
+        if (fs.existsSync(src)) {
+          try {
+            execSync(`cp "${src}" "${dst}"`, { timeout: 5000 });
+          } catch (e) {
+            console.log(`[server] Warning: Could not copy ${file}`);
+          }
+        }
+      }
+
+      // Copy auth directories
+      for (const dir of authDirs) {
+        const src = `${sourceProfile}/${dir}`;
+        const dst = `${targetProfile}/${dir}`;
+        if (fs.existsSync(src)) {
+          try {
+            execSync(`rm -rf "${dst}" && cp -r "${src}" "${dst}"`, { timeout: 10000 });
+          } catch (e) {
+            console.log(`[server] Warning: Could not copy ${dir}`);
+          }
+        }
+      }
 
       // Remove lock files
       const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
@@ -968,7 +1013,7 @@ app.post('/api/sync-profiles', async (req, res) => {
         } catch (e) {}
       }
 
-      console.log(`[server] Copied profile to tuner ${i}`);
+      console.log(`[server] Copied auth files to tuner ${i}`);
     }
 
     // Restart Chrome for tuners 1+
