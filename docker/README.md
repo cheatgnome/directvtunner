@@ -53,14 +53,13 @@ docker pull sunnyside1/directvtuner:intel-vaapi
 
 | Tag | Description | Hardware |
 |-----|-------------|----------|
-| `latest` | CPU-only encoding (libx264) | Any |
-| `nvidia` | NVIDIA NVENC single-tuner | NVIDIA GPU (GTX 600+) |
+| `latest` | CPU encoding (libx264) with multi-tuner support | Any x86_64 |
 | `nvidia-multi` | NVIDIA NVENC multi-tuner | NVIDIA GPU (GTX 600+) |
-| `intel-vaapi` | Intel VA-API (single or multi-tuner) | Intel CPU with iGPU |
+| `intel-vaapi` | Intel VA-API multi-tuner | Intel CPU with iGPU |
 
 ### Multi-Tuner Support
 
-All GPU images support multi-tuner via the `DVR_NUM_TUNERS` environment variable:
+All images support multi-tuner via the `DVR_NUM_TUNERS` environment variable:
 - Set `DVR_NUM_TUNERS=3` for 3 simultaneous tuners
 - Each tuner runs its own Chrome instance and Xvfb display
 - Each tuner has its own noVNC port (6080, 6081, 6082)
@@ -291,9 +290,11 @@ docker run -d \
 | `DVR_NVENC_RC` | `vbr` | Rate control: `vbr`, `cbr`, `cq` |
 | `DVR_NVENC_BFRAMES` | `0` | B-frames (0 for lowest latency) |
 
-### GPU Monitoring
+### GPU/CPU Monitoring
 
-The web GUI (Status tab) shows real-time GPU stats:
+The web GUI (Status tab) shows real-time stats:
+
+**NVIDIA GPU:**
 - GPU Name & Driver Version
 - GPU Utilization %
 - Encoder Utilization %
@@ -301,6 +302,17 @@ The web GUI (Status tab) shows real-time GPU stats:
 - Temperature
 - Power Draw
 - Active Encoder Sessions
+
+**Intel GPU:**
+- GPU Name & Driver Version
+- VA-API Support Status
+- Video Engine Utilization
+
+**CPU (latest image):**
+- CPU Model & Core Count
+- CPU Usage %
+- Memory Usage
+- Load Averages (1m, 5m, 15m)
 
 ### Performance Comparison
 
@@ -364,14 +376,6 @@ Use the provided `docker-compose.intel-multi.yml`:
 ```bash
 docker-compose -f docker-compose.intel-multi.yml up -d
 ```
-
-### Intel GPU Monitoring
-
-The web GUI shows Intel GPU stats:
-- GPU Name & Driver Version
-- VA-API Support Status
-- Video Engine Utilization (when streaming)
-- Render Device Path
 
 **Note:** `--privileged` flag is optional - only needed for `intel_gpu_top` GPU utilization monitoring in the web UI. VA-API encoding works without it.
 
