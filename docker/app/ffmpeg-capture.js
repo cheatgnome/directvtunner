@@ -24,6 +24,7 @@ class FFmpegCapture {
     this.useHwAccel = config.hwAccel; // Track current hw accel mode (can fallback to 'none')
     this.hwAccelFailed = false; // Track if hw accel failed for this session
     this.nvencErrorDetected = false; // Track if we saw actual NVENC errors (not just process kill)
+    this.vaapiErrorDetected = false; // Track if we saw actual VAAPI errors
 
     // HLS output mode (better for multiple clients)
     this.hlsMode = config.hlsMode !== false; // Default to HLS mode
@@ -92,10 +93,11 @@ class FFmpegCapture {
     this.restartAttempts = 0;
     this.stopping = false;
 
-    // Always reset to try NVENC on new stream start
+    // Always reset to try hardware encoding on new stream start
     // The fallback only persists within a single stream session
     this.hwAccelFailed = false;
     this.nvencErrorDetected = false;
+    this.vaapiErrorDetected = false;
     this.useHwAccel = config.hwAccel;
 
     const platform = config.getPlatform();
@@ -144,7 +146,7 @@ class FFmpegCapture {
                       (hwAccel === 'vaapi' ? 'h264_vaapi' : 'libx264'));
 
       console.log(`[ffmpeg-${this.tunerId}] Using settings: ${width}x${height} @ ${videoBitrate} video, ${audioBitrate} audio`);
-      console.log(`[ffmpeg-${this.tunerId}] Encoder: ${encoder} (hwAccel: ${hwAccel})${this.hwAccelFailed ? ' [NVENC failed, using fallback]' : ''}`);
+      console.log(`[ffmpeg-${this.tunerId}] Encoder: ${encoder} (hwAccel: ${hwAccel})${this.hwAccelFailed ? ' [HW accel failed, using software fallback]' : ''}`);
       this.stats.encoder = encoder;
 
       // Build video encoder arguments based on hardware acceleration
@@ -391,6 +393,14 @@ class FFmpegCapture {
         console.error(`[ffmpeg-${this.tunerId}] NVENC ERROR DETECTED: ${msg.trim()}`);
         this.nvencErrorDetected = true;
       }
+      // Detect actual VAAPI initialization failures
+      if (msg.includes('Failed to initialise VAAPI') || msg.includes('VAAPI connection') ||
+          msg.includes('vaapi') && (msg.includes('error') || msg.includes('Error') || msg.includes('failed')) ||
+          msg.includes('iHD_drv_video.so init failed') || msg.includes('Device creation failed') ||
+          msg.includes('DRM_IOCTL_I915_GEM_APERTURE failed')) {
+        console.error(`[ffmpeg-${this.tunerId}] VAAPI ERROR DETECTED: ${msg.trim()}`);
+        this.vaapiErrorDetected = true;
+      }
       if (msg.includes('Error') || msg.includes('error')) {
         console.error(`[ffmpeg-${this.tunerId}] ${msg}`);
         this.stats.errors.push({ time: Date.now(), message: msg.trim() });
@@ -426,8 +436,27 @@ class FFmpegCapture {
         }
       }
 
-      // Reset NVENC error flag for next attempt
+      // Check if VAAPI actually failed (not just killed) - only fallback if we saw real VAAPI errors
+      if (code !== 0 && uptime < 5000 && this.useHwAccel === 'vaapi' && !this.hwAccelFailed && this.vaapiErrorDetected) {
+        console.warn(`[ffmpeg-${this.tunerId}] VAAPI failed with actual errors (${uptime}ms), falling back to software encoding`);
+        this.hwAccelFailed = true;
+        this.useHwAccel = 'none';
+        this.restartAttempts = 0; // Reset restart attempts for fallback
+
+        if (this.shouldRestart || this.clients.length > 0) {
+          console.log(`[ffmpeg-${this.tunerId}] Restarting with libx264...`);
+          setTimeout(() => {
+            if (!this.isRunning) {
+              this.start(this.displayNum);
+            }
+          }, 500);
+          return;
+        }
+      }
+
+      // Reset error flags for next attempt
       this.nvencErrorDetected = false;
+      this.vaapiErrorDetected = false;
 
       if (this.shouldRestart && this.clients.length > 0 && code !== 0) {
         this.restartAttempts++;
