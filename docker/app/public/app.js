@@ -114,6 +114,7 @@ function settingsApp() {
       encoder: 'libx264',
       nvidia: null,
       intel: null,
+      cpu: null,
       nvencSettings: null
     },
     gpuInterval: null,
@@ -426,6 +427,7 @@ function settingsApp() {
             encoder: data.encoder || 'libx264',
             nvidia: data.nvidia || null,
             intel: data.intel || null,
+            cpu: data.cpu || null,
             nvencSettings: data.nvencSettings || null,
             qsvSettings: data.qsvSettings || null
           };
@@ -436,10 +438,8 @@ function settingsApp() {
     },
 
     startGpuPolling() {
-      // Only poll if GPU is available
-      if (this.gpuStatus.available) {
-        this.gpuInterval = setInterval(() => this.loadGpuStatus(), 5000);
-      }
+      // Always poll for GPU/CPU stats
+      this.gpuInterval = setInterval(() => this.loadGpuStatus(), 5000);
     },
 
     stopGpuPolling() {

@@ -585,6 +585,40 @@
                     <span class="cpu-icon">💻</span>
                     Using CPU encoding (<span x-text="gpuStatus.encoder"></span>)
                   </p>
+                  <!-- CPU Stats -->
+                  <template x-if="gpuStatus.cpu">
+                    <div class="cpu-stats">
+                      <p class="gpu-name" x-text="gpuStatus.cpu.model"></p>
+                      <div class="stat-row">
+                        <label>CPU Usage</label>
+                        <div class="progress-bar">
+                          <div class="progress-fill" :style="'width: ' + gpuStatus.cpu.usage + '%'"></div>
+                        </div>
+                        <span class="stat-value" x-text="gpuStatus.cpu.usage + '%'"></span>
+                      </div>
+                      <div class="stat-row">
+                        <label>Memory</label>
+                        <div class="progress-bar">
+                          <div class="progress-fill memory" :style="'width: ' + gpuStatus.cpu.memory.usedPercent + '%'"></div>
+                        </div>
+                        <span class="stat-value" x-text="gpuStatus.cpu.memory.used.toFixed(1) + ' / ' + gpuStatus.cpu.memory.total.toFixed(1) + ' GB'"></span>
+                      </div>
+                      <div class="gpu-details">
+                        <div class="detail-item">
+                          <span class="detail-label">Cores</span>
+                          <span class="detail-value" x-text="gpuStatus.cpu.cores"></span>
+                        </div>
+                        <div class="detail-item">
+                          <span class="detail-label">Load (1m)</span>
+                          <span class="detail-value" x-text="gpuStatus.cpu.loadAvg['1m']"></span>
+                        </div>
+                        <div class="detail-item">
+                          <span class="detail-label">Load (5m)</span>
+                          <span class="detail-value" x-text="gpuStatus.cpu.loadAvg['5m']"></span>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
                   <p class="gpu-hint" x-show="!gpuStatus.available">
                     For hardware acceleration, use the <code>:nvidia</code> or <code>:intel</code> image tags.
                   </p>

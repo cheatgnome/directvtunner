@@ -6,13 +6,17 @@
 const { exec, execSync } = require('child_process');
 const config = require('./config');
 
+const os = require('os');
+
 class GPUMonitor {
   constructor() {
     this.gpuInfo = null;
+    this.cpuInfo = null;
     this.lastUpdate = null;
     this.updateInterval = null;
     this.available = false;
     this.type = 'none'; // 'none', 'nvidia', 'intel'
+    this.lastCpuTimes = null;
   }
 
   /**
@@ -50,6 +54,64 @@ class GPUMonitor {
     console.log('[gpu-monitor] No GPU detected, using CPU encoding');
     this.type = 'none';
     this.available = false;
+
+    // Start CPU monitoring for software encoding
+    this.startMonitoring();
+  }
+
+  /**
+   * Get CPU usage statistics
+   */
+  getCpuUsage() {
+    const cpus = os.cpus();
+    let totalIdle = 0;
+    let totalTick = 0;
+
+    for (const cpu of cpus) {
+      for (const type in cpu.times) {
+        totalTick += cpu.times[type];
+      }
+      totalIdle += cpu.times.idle;
+    }
+
+    const currentTimes = { idle: totalIdle, total: totalTick };
+
+    let usage = 0;
+    if (this.lastCpuTimes) {
+      const idleDiff = currentTimes.idle - this.lastCpuTimes.idle;
+      const totalDiff = currentTimes.total - this.lastCpuTimes.total;
+      usage = totalDiff > 0 ? Math.round(100 - (100 * idleDiff / totalDiff)) : 0;
+    }
+
+    this.lastCpuTimes = currentTimes;
+
+    // Get load averages
+    const loadAvg = os.loadavg();
+
+    // Get memory info
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const usedMem = totalMem - freeMem;
+
+    this.cpuInfo = {
+      model: cpus[0]?.model || 'Unknown CPU',
+      cores: cpus.length,
+      usage: usage,
+      loadAvg: {
+        '1m': loadAvg[0].toFixed(2),
+        '5m': loadAvg[1].toFixed(2),
+        '15m': loadAvg[2].toFixed(2),
+      },
+      memory: {
+        total: Math.round(totalMem / (1024 * 1024 * 1024) * 100) / 100, // GB
+        used: Math.round(usedMem / (1024 * 1024 * 1024) * 100) / 100,
+        free: Math.round(freeMem / (1024 * 1024 * 1024) * 100) / 100,
+        usedPercent: Math.round((usedMem / totalMem) * 100),
+      }
+    };
+
+    this.lastUpdate = Date.now();
+    return this.cpuInfo;
   }
 
   /**
@@ -230,8 +292,16 @@ class GPUMonitor {
         await this.detectNvidia();
       } else if (this.type === 'intel') {
         await this.detectIntel();
+      } else {
+        // Monitor CPU for software encoding
+        this.getCpuUsage();
       }
     }, 5000);
+
+    // Initial CPU reading
+    if (this.type === 'none') {
+      this.getCpuUsage();
+    }
   }
 
   /**
@@ -313,6 +383,17 @@ class GPUMonitor {
           device: '/dev/dri/renderD128',
         };
       }
+    }
+
+    // Add CPU info for software encoding (or always for general system info)
+    if (this.cpuInfo) {
+      status.cpu = {
+        model: this.cpuInfo.model,
+        cores: this.cpuInfo.cores,
+        usage: this.cpuInfo.usage,
+        loadAvg: this.cpuInfo.loadAvg,
+        memory: this.cpuInfo.memory,
+      };
     }
 
     return status;

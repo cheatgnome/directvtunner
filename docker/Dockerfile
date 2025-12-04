@@ -1,3 +1,5 @@
+# Software-based DirecTV Tuner (Multi-tuner support)
+# Uses libx264 for CPU-based H.264 encoding
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -6,9 +8,10 @@ ENV VNC_PORT=5901
 ENV NOVNC_PORT=6080
 ENV CHROME_DEBUG_PORT=9222
 ENV DVR_PORT=7070
+ENV DVR_HW_ACCEL=software
 ENV DVR_IMAGE=sunnyside1/directvtuner:latest
 
-# Install base packages
+# Install base packages (without ffmpeg - we'll install a better static build)
 RUN apt-get update && apt-get install -y \
     wget \
     curl \
@@ -23,7 +26,6 @@ RUN apt-get update && apt-get install -y \
     git \
     python3 \
     python3-pip \
-    ffmpeg \
     pulseaudio \
     unclutter \
     dbus-x11 \
@@ -40,7 +42,17 @@ RUN apt-get update && apt-get install -y \
     libxcb-dri3-0 \
     libdrm2 \
     libxshmfence1 \
+    xz-utils \
     && rm -rf /var/lib/apt/lists/*
+
+# Install FFmpeg static build from BtbN (better encoding support)
+RUN wget -q https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz -O /tmp/ffmpeg.tar.xz \
+    && tar xf /tmp/ffmpeg.tar.xz -C /tmp \
+    && cp /tmp/ffmpeg-master-latest-linux64-gpl/bin/ffmpeg /usr/local/bin/ffmpeg \
+    && cp /tmp/ffmpeg-master-latest-linux64-gpl/bin/ffprobe /usr/local/bin/ffprobe \
+    && chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe \
+    && rm -rf /tmp/ffmpeg* \
+    && ffmpeg -version
 
 # Install Node.js 20.x
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
