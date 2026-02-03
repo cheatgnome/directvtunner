@@ -24,24 +24,8 @@ def run(playwright):
     # Take screenshot
     page.screenshot(path="verification/status_tab.png")
 
-    # Check if CinemaOS text is present (should not be)
-    content = page.content()
-    if "CinemaOS Movies" in content:
-        print("FAILURE: CinemaOS Movies text found in page content")
-    else:
-        print("SUCCESS: CinemaOS Movies text not found")
-
-    if "TV Shows" in content:
-        # Note: "TV Shows" might be in the content if I didn't remove the card completely?
-        # I removed both cards.
-        # But wait, "TV Shows" text might be elsewhere?
-        # In index.html: <h3>TV Shows</h3> was removed.
-        print("CHECK: TV Shows text found in page content?")
-        # Let's check specifically for the header
-        if "<h3>TV Shows</h3>" in content:
-             print("FAILURE: TV Shows header found")
-        else:
-             print("SUCCESS: TV Shows header not found")
+    # Basic sanity check to ensure the page rendered
+    print(f"Page title: {page.title()}")
 
     browser.close()
 

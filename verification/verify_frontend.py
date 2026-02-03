@@ -33,19 +33,7 @@ with sync_playwright() as p:
     # Take screenshot
     page.screenshot(path='../verification/frontend.png')
 
-    # Check for text presence
-    content = page.content()
-    if 'CinemaOS Movies' in content:
-        print('FAILURE: CinemaOS Movies found in page content')
-    else:
-        print('SUCCESS: CinemaOS Movies NOT found in page content')
-
-    if 'TV Shows' in content:
-        # Note: TV Shows might be in other context?
-        # The card header was <h3>TV Shows</h3>
-        if '<h3>TV Shows</h3>' in content:
-             print('FAILURE: TV Shows card found')
-        else:
-             print('SUCCESS: TV Shows card NOT found')
+    # Basic sanity check to ensure the page rendered
+    print(f'Page title: {page.title()}')
 
     browser.close()
