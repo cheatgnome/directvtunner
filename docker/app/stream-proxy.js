@@ -50,7 +50,7 @@ app.get('/health', (req, res) => {
 app.get('/api/version', (req, res) => {
   const pkg = require('./package.json');
   const os = require('os');
-  
+
   function formatUptime(seconds) {
     const days = Math.floor(seconds / 86400);
     const hours = Math.floor((seconds % 86400) / 3600);
@@ -59,7 +59,7 @@ app.get('/api/version', (req, res) => {
     if (hours > 0) return hours + 'h ' + mins + 'm';
     return mins + 'm';
   }
-  
+
   res.json({
     version: pkg.version || '1.0.0',
     name: pkg.name || 'directv-tuner',
@@ -117,7 +117,7 @@ app.get("/api/status", async (req, res) => {
 
     // Get tuner status with channel names
     const tunerStatus = tunerManager.getStatus();
-    
+
     // Load channels to get names
     let channelMap = {};
     try {
@@ -129,8 +129,8 @@ app.get("/api/status", async (req, res) => {
           channelMap[ch.number] = { name: ch.callSign || ch.name, fullName: ch.name };
         });
       }
-    } catch (e) {}
-    
+    } catch (e) { }
+
     // Enhance tuner info with channel names and per-tuner login status
     tunerStatus.tuners = await Promise.all(tunerStatus.tuners.map(async (t) => {
       // Check login status for this specific tuner
@@ -145,7 +145,7 @@ app.get("/api/status", async (req, res) => {
           tunerLoginStatus.isLoggedIn = url.includes("stream.directv.com") && !url.includes("login") && !url.includes("signin") && !url.includes("auth");
           tunerLoginStatus.needsLogin = url.includes("login") || url.includes("signin") || url.includes("auth");
         }
-      } catch (e) {}
+      } catch (e) { }
 
       return {
         ...t,
@@ -261,17 +261,17 @@ app.get('/api/logs', (req, res) => {
   const lines = parseInt(req.query.lines) || 100;
   const logFile = '/var/log/supervisor/dvr.log';
   const errFile = '/var/log/supervisor/dvr_err.log';
-  
+
   const logs = [];
-  
+
   // Helper to parse log lines
   const parseLogLine = (line, isError = false) => {
     const timestamp = new Date().toISOString().substr(11, 8);
     let level = 'info';
     let message = line.trim();
-    
+
     if (!message) return null;
-    
+
     // Detect level from content
     if (isError || message.includes('Error:') || message.includes('[error]') || message.includes('ERROR') || message.includes('failed')) {
       level = 'error';
@@ -280,14 +280,14 @@ app.get('/api/logs', (req, res) => {
     } else if (message.includes('[warn]') || message.includes('WARN')) {
       level = 'warn';
     }
-    
+
     // Extract timestamp if present in log
     const tsMatch = message.match(/^\[?(\d{2}:\d{2}:\d{2})\]?\s*/);
     const time = tsMatch ? tsMatch[1] : timestamp;
-    
+
     return { time, level, message };
   };
-  
+
   try {
     // Read main log
     if (fs.existsSync(logFile)) {
@@ -298,7 +298,7 @@ app.get('/api/logs', (req, res) => {
         if (parsed) logs.push(parsed);
       });
     }
-    
+
     // Read error log
     if (fs.existsSync(errFile)) {
       const content = fs.readFileSync(errFile, 'utf8');
@@ -308,10 +308,10 @@ app.get('/api/logs', (req, res) => {
         if (parsed) logs.push(parsed);
       });
     }
-    
+
     // Sort by time (most recent last)
     logs.sort((a, b) => a.time.localeCompare(b.time));
-    
+
     res.json({ logs: logs.slice(-lines) });
   } catch (err) {
     res.status(500).json({ error: err.message, logs: [] });
@@ -338,7 +338,7 @@ app.get('/api/system-info', (req, res) => {
     let containerId = '-';
     try {
       containerId = fs.readFileSync('/etc/hostname', 'utf8').trim().substring(0, 12);
-    } catch (e) {}
+    } catch (e) { }
 
     // Get image info from environment or file
     const imageInfo = process.env.DVR_IMAGE || 'sunnyside1/directvtuner:latest';
@@ -572,7 +572,7 @@ app.get('/stream/:channelId', async (req, res) => {
         await new Promise(r => setTimeout(r, 500));
         hlsWait += 500;
         if (hlsWait % 5000 === 0) {
-          log(`Still waiting for HLS playlist... (${hlsWait/1000}s)`);
+          log(`Still waiting for HLS playlist... (${hlsWait / 1000}s)`);
         }
       }
 
@@ -615,7 +615,7 @@ app.get('/stream/:channelId', async (req, res) => {
       console.log(`[server] Channel ${channelId} has no upcoming airings, sending error video`);
       res.setHeader("Content-Type", "video/mp2t");
       res.setHeader("Cache-Control", "no-cache");
-      
+
       // Generate a simple error video with FFmpeg
       const { spawn } = require("child_process");
       const ffmpeg = spawn("ffmpeg", [
@@ -631,9 +631,9 @@ app.get('/stream/:channelId', async (req, res) => {
         "-f", "mpegts",
         "-"
       ]);
-      
+
       ffmpeg.stdout.pipe(res);
-      ffmpeg.stderr.on("data", () => {});
+      ffmpeg.stderr.on("data", () => { });
       ffmpeg.on("close", () => res.end());
       return;
     }
@@ -694,8 +694,8 @@ app.get('/tuner/:tunerId/:segment', (req, res) => {
   // Regular HLS: .ts files
   // LL-HLS: .m4s segments and init.mp4
   const isValidSegment = segment.endsWith('.ts') ||
-                         segment.endsWith('.m4s') ||
-                         segment === 'init.mp4';
+    segment.endsWith('.m4s') ||
+    segment === 'init.mp4';
 
   if (!isValidSegment) {
     return res.status(400).json({ error: 'Invalid segment' });
@@ -935,7 +935,7 @@ async function syncChromeProfiles() {
     for (const lock of lockFiles) {
       try {
         fs.unlinkSync(`${targetProfile}/${lock}`);
-      } catch (e) {}
+      } catch (e) { }
     }
 
     console.log(`[server] Copied auth files to tuner ${i}`);
@@ -989,6 +989,9 @@ async function syncChromeProfiles() {
 async function checkAndAutoSyncLogin() {
   const numTuners = parseInt(process.env.DVR_NUM_TUNERS) || 1;
   if (numTuners <= 1 || profileSyncedAfterLogin) return;
+
+  // Allow disabling auto-sync for multi-account setups
+  if (process.env.DVR_PROFILE_SYNC_DISABLED === 'true') return;
 
   const now = Date.now();
   if (now - lastLoginCheckTime < LOGIN_CHECK_INTERVAL) return;
@@ -1234,27 +1237,27 @@ async function startLoginWatcher() {
   if (loginWatcherActive) return;
   loginWatcherActive = true;
   loginDetected = false;
-  
+
   console.log("[login-watcher] Starting login monitor...");
-  
+
   const checkInterval = 10000; // Check every 10 seconds
   const maxWait = 600000; // Max 10 minutes
   let waited = 0;
-  
+
   const check = async () => {
     try {
       const tuner = tunerManager.getTuner(0);
       if (tuner && tuner.page) {
         const url = tuner.page.url();
-        const isLoggedIn = url.includes("stream.directv.com") && 
-          !url.includes("login") && 
-          !url.includes("signin") && 
+        const isLoggedIn = url.includes("stream.directv.com") &&
+          !url.includes("login") &&
+          !url.includes("signin") &&
           !url.includes("auth");
-        
+
         if (isLoggedIn && !loginDetected) {
           loginDetected = true;
           console.log("[login-watcher] Login detected! Triggering EPG refresh...");
-          
+
           // Check if EPG is empty or stale
           const epgStatus = directvEpg.getStatus();
           if (epgStatus.channelCount === 0 || epgStatus.cacheAge > 14400) {
@@ -1276,7 +1279,7 @@ async function startLoginWatcher() {
     } catch (e) {
       console.log("[login-watcher] Check error:", e.message);
     }
-    
+
     waited += checkInterval;
     if (waited < maxWait) {
       setTimeout(check, checkInterval);
@@ -1285,7 +1288,7 @@ async function startLoginWatcher() {
       loginWatcherActive = false;
     }
   };
-  
+
   // Start checking after 15 seconds (give browser time to load)
   setTimeout(check, 15000);
 }

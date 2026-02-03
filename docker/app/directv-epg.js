@@ -27,7 +27,9 @@ function getRefreshInterval() {
 
 class DirectvEpg {
   constructor() {
-    this.channels = [];
+    this.channels = [];           // Merged channel list (deduplicated)
+    this.tunerChannels = {};      // Per-tuner channels: { tunerId: [...channels] }
+    this.tunerMapping = {};       // Channel to tuner: { channelNumber: tunerId }
     this.schedules = {};
     this.lastFetch = null;
     this.refreshTimer = null;
@@ -82,7 +84,9 @@ class DirectvEpg {
       if (fs.existsSync(CHANNELS_CACHE)) {
         const data = JSON.parse(fs.readFileSync(CHANNELS_CACHE, 'utf8'));
         this.channels = data.channels || [];
-        console.log(`[epg] Loaded ${this.channels.length} channels from cache`);
+        this.tunerChannels = data.tunerChannels || {};
+        this.tunerMapping = data.tunerMapping || {};
+        console.log(`[epg] Loaded ${this.channels.length} channels from cache (${Object.keys(this.tunerChannels).length} tuners)`);
       }
       if (fs.existsSync(EPG_CACHE)) {
         const data = JSON.parse(fs.readFileSync(EPG_CACHE, 'utf8'));
@@ -100,7 +104,11 @@ class DirectvEpg {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
       }
-      fs.writeFileSync(CHANNELS_CACHE, JSON.stringify({ channels: this.channels }, null, 2));
+      fs.writeFileSync(CHANNELS_CACHE, JSON.stringify({
+        channels: this.channels,
+        tunerChannels: this.tunerChannels,
+        tunerMapping: this.tunerMapping
+      }, null, 2));
       fs.writeFileSync(EPG_CACHE, JSON.stringify({ schedules: this.schedules, lastFetch: this.lastFetch }, null, 2));
       console.log('[epg] Cache saved');
     } catch (err) {
@@ -109,6 +117,7 @@ class DirectvEpg {
   }
 
   // Fetch channels and EPG via browser CDP (uses authenticated session)
+  // Scans ALL tuners to support multi-account setups
   async fetchFromBrowser() {
     if (this.isRefreshing) {
       console.log('[epg] Refresh already in progress, skipping');
@@ -116,19 +125,93 @@ class DirectvEpg {
     }
 
     this.isRefreshing = true;
-    console.log('[epg] Fetching EPG data via browser...');
+    const numTuners = parseInt(process.env.DVR_NUM_TUNERS) || 1;
+    console.log(`[epg] Fetching EPG data from ${numTuners} tuner(s)...`);
 
-    const browser = await chromium.connectOverCDP('http://localhost:9222');
-    const contexts = browser.contexts();
-
-    if (contexts.length === 0) {
-      throw new Error('No browser context found');
-    }
-
-    const context = contexts[0];
-    const page = await context.newPage();
+    // Reset per-tuner data
+    this.tunerChannels = {};
+    this.tunerMapping = {};
+    const allChannelsByNumber = new Map(); // For deduplication
 
     try {
+      // Scan each tuner
+      for (let tunerId = 0; tunerId < numTuners; tunerId++) {
+        const debugPort = 9222 + tunerId;
+        console.log(`[epg] Scanning tuner ${tunerId} (port ${debugPort})...`);
+
+        try {
+          const tunerChannels = await this.fetchFromTuner(tunerId, debugPort);
+
+          if (tunerChannels.length > 0) {
+            this.tunerChannels[tunerId] = tunerChannels;
+            console.log(`[epg] Tuner ${tunerId}: Found ${tunerChannels.length} channels`);
+
+            // Build tuner mapping (first tuner with channel wins)
+            for (const channel of tunerChannels) {
+              if (!this.tunerMapping[channel.number]) {
+                this.tunerMapping[channel.number] = tunerId;
+              }
+              // Also add to merged channel list (deduplicated by number)
+              if (!allChannelsByNumber.has(channel.number)) {
+                allChannelsByNumber.set(channel.number, channel);
+              }
+            }
+          } else {
+            console.log(`[epg] Tuner ${tunerId}: No channels found (not logged in?)`);
+          }
+        } catch (err) {
+          console.log(`[epg] Tuner ${tunerId}: Failed to scan - ${err.message}`);
+        }
+      }
+
+      // Build merged channel list sorted by channel number
+      this.channels = Array.from(allChannelsByNumber.values())
+        .sort((a, b) => parseInt(a.number) - parseInt(b.number));
+
+      console.log(`[epg] Total: ${this.channels.length} unique channels from ${Object.keys(this.tunerChannels).length} tuner(s)`);
+
+      // Log tuner mapping summary
+      const tunerCounts = {};
+      for (const tunerId of Object.values(this.tunerMapping)) {
+        tunerCounts[tunerId] = (tunerCounts[tunerId] || 0) + 1;
+      }
+      console.log('[epg] Tuner mapping:', tunerCounts);
+
+      this.lastFetch = Date.now();
+      this.saveCache();
+
+      this.isRefreshing = false;
+      return {
+        channels: this.channels.length,
+        schedules: Object.keys(this.schedules).length,
+        tunerChannels: Object.fromEntries(
+          Object.entries(this.tunerChannels).map(([k, v]) => [k, v.length])
+        )
+      };
+
+    } catch (err) {
+      this.isRefreshing = false;
+      throw err;
+    }
+  }
+
+  // Fetch channels from a single tuner
+  async fetchFromTuner(tunerId, debugPort) {
+    let browser = null;
+    let page = null;
+
+    try {
+      browser = await chromium.connectOverCDP(`http://localhost:${debugPort}`);
+      const contexts = browser.contexts();
+
+      if (contexts.length === 0) {
+        console.log(`[epg] Tuner ${tunerId}: No browser context found`);
+        return [];
+      }
+
+      const context = contexts[0];
+      page = await context.newPage();
+
       // Capture API responses
       const apiResponses = {};
 
@@ -143,20 +226,12 @@ class DirectvEpg {
               // Capture channels
               if (url.includes('/allchannels')) {
                 apiResponses.channels = body;
-                console.log(`[epg] Captured ${body.channelInfoList?.length || 0} channels`);
-                // Log first channel to see available properties
-                if (body.channelInfoList?.[0]) {
-                  console.log("[epg] Sample channel keys:", Object.keys(body.channelInfoList[0]).join(", "));
-                  fs.writeFileSync("/tmp/raw_channels.json", JSON.stringify(body.channelInfoList, null, 2));
-                  console.log("[epg] Sample channel:", JSON.stringify(body.channelInfoList[0]).substring(0, 500));
-                }
               }
 
-              // Capture schedule
+              // Capture schedule  
               if (url.includes('/schedule') && body.schedules) {
                 if (!apiResponses.schedules) apiResponses.schedules = [];
                 apiResponses.schedules.push(...body.schedules);
-                console.log(`[epg] Captured ${body.schedules.length} schedule items`);
               }
             }
           } catch (e) {
@@ -166,62 +241,39 @@ class DirectvEpg {
       });
 
       // Navigate to guide page to trigger API calls
-      console.log('[epg] Navigating to guide page...');
       await page.goto('https://stream.directv.com/guide', {
         waitUntil: 'domcontentloaded',
         timeout: 30000
       });
 
-      // Click on "Streaming" filter to only get streamable channels
-      console.log('[epg] Clicking Streaming filter...');
-      try {
-        // Click the Filter dropdown
-        await page.click('[aria-label="Filter: Streaming"], [aria-label*="Filter"]', { timeout: 5000 });
-        await page.waitForTimeout(1000);
-        // Click "Streaming Channels" option
-        await page.click('text=Streaming Channels', { timeout: 5000 });
-        // Filter is client-side, API already has all channels
-        // We filter by mDVR below instead
-        await page.waitForTimeout(5000);
-        console.log('[epg] Streaming filter applied');
-      } catch (e) {
-        console.log('[epg] Could not apply streaming filter:', e.message);
-      }
-
       // Wait for data to load
       await page.waitForTimeout(8000);
 
-      // Scroll to trigger more schedule loads
-      for (let i = 0; i < 3; i++) {
-        await page.keyboard.press('PageDown');
-        await page.waitForTimeout(2000);
-      }
-
-      // Close the page we created
+      // Close the page
       await page.close();
+      page = null;
 
       // Process captured data
+      const channels = [];
       if (apiResponses.channels?.channelInfoList) {
         const allChannels = apiResponses.channels.channelInfoList;
-        const mDVRValues = [...new Set(allChannels.map(ch => ch.mDVR))];
-        const mdvrValues = [...new Set(allChannels.map(ch => ch.mdvr))];
-        console.log("[epg] mDVR values found:", mDVRValues, "mdvr values:", mdvrValues);
         const streamableChannels = allChannels.filter(ch => ch.augmentation?.constraints?.isLiveStreamEnabled === true);
-        console.log(`[epg] Filtering: ${allChannels.length} total -> ${streamableChannels.length} streamable (isLiveStreamEnabled=true)`);
-        this.channels = streamableChannels.map(ch => ({
-          id: ch.resourceId,
-          name: ch.channelName,
-          number: ch.channelNumber,
-          callSign: ch.callSign,
-          ccid: ch.ccid,
-          logo: ch.imageList?.find(i => i.imageType === 'chlogo-clb-guide')?.imageUrl || null,
-          format: ch.format
-        }));
-        console.log(`[epg] Processed ${this.channels.length} channels`);
+
+        for (const ch of streamableChannels) {
+          channels.push({
+            id: ch.resourceId,
+            name: ch.channelName,
+            number: ch.channelNumber,
+            callSign: ch.callSign,
+            ccid: ch.ccid,
+            logo: ch.imageList?.find(i => i.imageType === 'chlogo-clb-guide')?.imageUrl || null,
+            format: ch.format
+          });
+        }
       }
 
+      // Process schedules (merge into main schedules)
       if (apiResponses.schedules) {
-        // Group schedules by channel
         for (const schedule of apiResponses.schedules) {
           const channelId = schedule.channelId;
           if (!this.schedules[channelId]) {
@@ -231,54 +283,46 @@ class DirectvEpg {
           for (const content of schedule.contents || []) {
             const consumable = content.consumables?.[0];
             if (consumable) {
-              this.schedules[channelId].push({
-                title: content.title || content.displayTitle,
-                subtitle: content.episodeTitle || null,
-                description: content.description || '',
-                startTime: consumable.startTime,
-                endTime: consumable.endTime,
-                duration: consumable.duration,
-                categories: content.categories || [],
-                genres: content.genres || [],
-                rating: consumable.parentalRating || content.parentalRating,
-                seasonNumber: content.seasonNumber,
-                episodeNumber: content.episodeNumber,
-                originalAirDate: content.originalAirDate,
-                year: content.releaseYear
-              });
+              // Check if this schedule entry already exists
+              const exists = this.schedules[channelId].some(s =>
+                s.startTime === consumable.startTime && s.title === (content.title || content.displayTitle)
+              );
+              if (!exists) {
+                this.schedules[channelId].push({
+                  title: content.title || content.displayTitle,
+                  subtitle: content.episodeTitle || null,
+                  description: content.description || '',
+                  startTime: consumable.startTime,
+                  endTime: consumable.endTime,
+                  duration: consumable.duration,
+                  categories: content.categories || [],
+                  genres: content.genres || [],
+                  rating: consumable.parentalRating || content.parentalRating,
+                  seasonNumber: content.seasonNumber,
+                  episodeNumber: content.episodeNumber,
+                  originalAirDate: content.originalAirDate,
+                  year: content.releaseYear
+                });
+              }
             }
           }
         }
-        console.log(`[epg] Processed schedules for ${Object.keys(this.schedules).length} channels`);
       }
 
-      this.lastFetch = Date.now();
-      this.saveCache();
-
-      this.isRefreshing = false;
-      return {
-        channels: this.channels.length,
-        schedules: Object.keys(this.schedules).length
-      };
+      return channels;
 
     } catch (err) {
-      this.isRefreshing = false;
       throw err;
     } finally {
-      // Always ensure the guide page is closed
-      try {
-        if (page && !page.isClosed()) {
-          await page.close();
-          console.log('[epg] Closed EPG page');
-        }
-      } catch (e) {
-        console.log('[epg] Error closing page:', e.message);
+      // Cleanup
+      if (page && !page.isClosed()) {
+        try { await page.close(); } catch (e) { }
       }
 
-      // Extra safety: close any lingering guide pages via CDP
+      // Close lingering guide pages
       try {
         const http = require('http');
-        const req = http.get('http://localhost:9222/json', (res) => {
+        const req = http.get(`http://localhost:${debugPort}/json`, (res) => {
           let data = '';
           res.on('data', chunk => data += chunk);
           res.on('end', () => {
@@ -286,15 +330,14 @@ class DirectvEpg {
               const pages = JSON.parse(data);
               for (const p of pages) {
                 if (p.type === 'page' && p.url && p.url.includes('/guide')) {
-                  http.get(`http://localhost:9222/json/close/${p.id}`);
-                  console.log('[epg] Force-closed lingering guide page');
+                  http.get(`http://localhost:${debugPort}/json/close/${p.id}`);
                 }
               }
-            } catch (e) {}
+            } catch (e) { }
           });
         });
-        req.on('error', () => {});
-      } catch (e) {}
+        req.on('error', () => { });
+      } catch (e) { }
     }
   }
 
@@ -438,13 +481,34 @@ class DirectvEpg {
     return this.channels;
   }
 
+  // Get which tuner can access a given channel number
+  // Returns tunerId or null if channel not found
+  getTunerForChannel(channelNumber) {
+    const tunerId = this.tunerMapping[channelNumber];
+    return tunerId !== undefined ? tunerId : null;
+  }
+
+  // Get all tuners that have access to a channel
+  getTunersForChannel(channelNumber) {
+    const tuners = [];
+    for (const [tunerId, channels] of Object.entries(this.tunerChannels)) {
+      if (channels.some(ch => ch.number === channelNumber)) {
+        tuners.push(parseInt(tunerId));
+      }
+    }
+    return tuners;
+  }
+
   // Get EPG status
   getStatus() {
     return {
       channelCount: this.channels.length,
       scheduledChannels: Object.keys(this.schedules).length,
       lastFetch: this.lastFetch,
-      cacheAge: this.lastFetch ? Math.round((Date.now() - this.lastFetch) / 1000) : null
+      cacheAge: this.lastFetch ? Math.round((Date.now() - this.lastFetch) / 1000) : null,
+      tunerChannelCounts: Object.fromEntries(
+        Object.entries(this.tunerChannels).map(([k, v]) => [k, v.length])
+      )
     };
   }
 }
