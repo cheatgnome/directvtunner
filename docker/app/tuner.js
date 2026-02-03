@@ -1001,15 +1001,24 @@ class Tuner {
       console.log(`[tuner-${this.id}] Maximizing video and unmuting...`);
 
       // First, unmute the video by clicking the volume button if muted
+      // Use short timeout to avoid blocking startup
       try {
         const unmuteBtn = await this.page.$('[aria-label="unmute"]');
         if (unmuteBtn) {
           console.log(`[tuner-${this.id}] Found unmute button, clicking...`);
-          await unmuteBtn.click();
-          await new Promise(r => setTimeout(r, 500));
+          await unmuteBtn.click({ timeout: 2000 });
+          await new Promise(r => setTimeout(r, 300));
         }
       } catch (e) {
-        console.log(`[tuner-${this.id}] Could not unmute: ${e.message}`);
+        // Unmute button not clickable - use JS fallback (instant)
+        console.log(`[tuner-${this.id}] Unmute button not clickable, using JS fallback`);
+        await this.page.evaluate(() => {
+          const video = document.querySelector('video');
+          if (video) {
+            video.muted = false;
+            video.volume = 1.0;
+          }
+        });
       }
 
       // Click the fullscreen button on the DirecTV player
