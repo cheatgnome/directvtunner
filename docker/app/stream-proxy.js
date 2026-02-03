@@ -516,20 +516,23 @@ app.get('/stream/:channelId', async (req, res) => {
 
   log(`Stream request for ${channelId}`);
 
-  // Try to find channel in static channels.js first, then fall back to EPG data
+  // Try to find channel - first check static channels.js, then try EPG (supports both ID and number)
   let channel = getChannel(channelId);
   if (!channel) {
-    // Try EPG data for dynamically discovered channels (like locals)
-    channel = directvEpg.getChannelByNumber(channelId);
+    // Try EPG data - getChannel handles both ID and number lookup
+    channel = directvEpg.getChannel(channelId);
   }
   if (!channel) {
     return res.status(404).json({ error: `Unknown channel: ${channelId}` });
   }
 
   try {
+    // Use channel key for tuner allocation (EPG routes by number:name key)
+    const channelKey = channel.name ? `${channel.number}:${channel.name}` : channelId;
+
     // Allocate a tuner for this channel
     log('Allocating tuner...');
-    const tuner = await tunerManager.allocateTuner(channelId);
+    const tuner = await tunerManager.allocateTuner(channelKey);
     log(`Tuner allocated: ${tuner ? tuner.id : 'none'} (state: ${tuner?.state})`);
 
     if (!tuner) {
@@ -552,8 +555,8 @@ app.get('/stream/:channelId', async (req, res) => {
     log(`Tuner ready (state: ${tuner.state})`);
 
     // Verify tuner is on the correct channel
-    if (tuner.currentChannel !== channelId) {
-      console.log(`[server] Tuner switched away from ${channelId}, was expecting ${channelId} got ${tuner.currentChannel}`);
+    if (tuner.currentChannel !== channelKey) {
+      console.log(`[server] Tuner switched away from ${channelKey}, was expecting ${channelKey} got ${tuner.currentChannel}`);
       return res.status(503).json({ error: 'Channel switched, please retry' });
     }
 

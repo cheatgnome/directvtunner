@@ -131,7 +131,7 @@ class DirectvEpg {
     // Reset per-tuner data
     this.tunerChannels = {};
     this.tunerMapping = {};
-    const allChannelsByNumber = new Map(); // For deduplication
+    const allChannelsById = new Map(); // Deduplicate by ID (not number - some channels share numbers)
 
     try {
       // Scan each tuner
@@ -147,13 +147,15 @@ class DirectvEpg {
             console.log(`[epg] Tuner ${tunerId}: Found ${tunerChannels.length} channels`);
 
             // Build tuner mapping (first tuner with channel wins)
+            // Use compound key (number:name) to handle channels that share the same number
             for (const channel of tunerChannels) {
-              if (!this.tunerMapping[channel.number]) {
-                this.tunerMapping[channel.number] = tunerId;
+              const channelKey = `${channel.number}:${channel.name}`;
+              if (!this.tunerMapping[channelKey]) {
+                this.tunerMapping[channelKey] = tunerId;
               }
-              // Also add to merged channel list (deduplicated by number)
-              if (!allChannelsByNumber.has(channel.number)) {
-                allChannelsByNumber.set(channel.number, channel);
+              // Also add to merged channel list (deduplicated by ID)
+              if (!allChannelsById.has(channel.id)) {
+                allChannelsById.set(channel.id, channel);
               }
             }
           } else {
@@ -164,9 +166,13 @@ class DirectvEpg {
         }
       }
 
-      // Build merged channel list sorted by channel number
-      this.channels = Array.from(allChannelsByNumber.values())
-        .sort((a, b) => parseInt(a.number) - parseInt(b.number));
+      // Build merged channel list sorted by channel number, then by name
+      this.channels = Array.from(allChannelsById.values())
+        .sort((a, b) => {
+          const numDiff = parseInt(a.number) - parseInt(b.number);
+          if (numDiff !== 0) return numDiff;
+          return (a.name || '').localeCompare(b.name || '');
+        });
 
       console.log(`[epg] Total: ${this.channels.length} unique channels from ${Object.keys(this.tunerChannels).length} tuner(s)`);
 
@@ -352,7 +358,8 @@ class DirectvEpg {
 
     // Add channels
     for (const channel of this.channels) {
-      const tvgId = `dtv-${channel.number}`;
+      // Use channel ID for tvg-id (matches M3U, handles same-number channels)
+      const tvgId = `dtv-${channel.id}`;
       xml += `  <channel id="${tvgId}">\n`;
       xml += `    <display-name>${this.escapeXml(channel.name)}</display-name>\n`;
       xml += `    <display-name>${channel.number}</display-name>\n`;
@@ -368,7 +375,7 @@ class DirectvEpg {
     // Add programs
     for (const channel of this.channels) {
       const programs = this.schedules[channel.id] || [];
-      const tvgId = `dtv-${channel.number}`;
+      const tvgId = `dtv-${channel.id}`;
 
       for (const program of programs) {
         const start = new Date(program.startTime);
@@ -426,15 +433,18 @@ class DirectvEpg {
   }
 
   // Generate M3U playlist with tvg-id matching EPG
+  // Uses channel ID in URLs to handle channels with same number (e.g., NESN/NESN+)
   generateM3U(host) {
     let m3u = '#EXTM3U url-tvg="http://' + host + '/tve/directv/epg.xml"\n\n';
 
     for (const channel of this.channels) {
-      const tvgId = `dtv-${channel.number}`;
+      // Use channel ID for unique tvg-id (handles same-number channels)
+      const tvgId = `dtv-${channel.id}`;
       const groupTitle = this.getChannelGroup(channel);
 
       m3u += `#EXTINF:-1 tvg-id="${tvgId}" tvg-name="${channel.name}" tvg-logo="${channel.logo || ''}" tvg-chno="${channel.number}" group-title="${groupTitle}",${channel.name}\n`;
-      m3u += `http://${host}/stream/${channel.number}\n\n`;
+      // Use channel ID in URL to uniquely identify the channel
+      m3u += `http://${host}/stream/${encodeURIComponent(channel.id)}\n\n`;
     }
 
     return m3u;
@@ -471,9 +481,26 @@ class DirectvEpg {
       .replace(/'/g, '&apos;');
   }
 
-  // Get channel by number
+  // Get channel by number (first match if multiple share same number)
   getChannelByNumber(number) {
-    return this.channels.find(ch => ch.number === number);
+    return this.channels.find(ch => ch.number === number || String(ch.number) === String(number));
+  }
+
+  // Get channel by ID (resourceId - unique identifier)
+  getChannelById(id) {
+    return this.channels.find(ch => ch.id === id);
+  }
+
+  // Get channel by ID or number (tries ID first, then number)
+  getChannel(idOrNumber) {
+    // Try ID first
+    let channel = this.channels.find(ch => ch.id === idOrNumber);
+    if (channel) return channel;
+
+    // Try number
+    return this.channels.find(ch =>
+      ch.number === idOrNumber || String(ch.number) === String(idOrNumber)
+    );
   }
 
   // Get all channels
@@ -481,22 +508,49 @@ class DirectvEpg {
     return this.channels;
   }
 
-  // Get which tuner can access a given channel number
+  // Get which tuner can access a given channel
+  // Accepts channelKey (number:name format) or just a channel number
   // Returns tunerId or null if channel not found
-  getTunerForChannel(channelNumber) {
-    const tunerId = this.tunerMapping[channelNumber];
-    return tunerId !== undefined ? tunerId : null;
+  getTunerForChannel(channelKey) {
+    // Direct lookup with exact key
+    if (this.tunerMapping[channelKey] !== undefined) {
+      return this.tunerMapping[channelKey];
+    }
+
+    // Fallback: if given just a number, find first matching key
+    for (const [key, tunerId] of Object.entries(this.tunerMapping)) {
+      if (key.startsWith(`${channelKey}:`)) {
+        return tunerId;
+      }
+    }
+    return null;
   }
 
   // Get all tuners that have access to a channel
-  getTunersForChannel(channelNumber) {
+  // Accepts channelKey (number:name format) or just a channel number
+  getTunersForChannel(channelKey) {
     const tuners = [];
+
+    // Check if it's an exact key or just a number
+    const isExactKey = String(channelKey).includes(':');
+
     for (const [tunerId, channels] of Object.entries(this.tunerChannels)) {
-      if (channels.some(ch => ch.number === channelNumber)) {
+      const hasAccess = channels.some(ch => {
+        if (isExactKey) {
+          return `${ch.number}:${ch.name}` === channelKey;
+        }
+        return ch.number === channelKey || String(ch.number) === String(channelKey);
+      });
+      if (hasAccess) {
         tuners.push(parseInt(tunerId));
       }
     }
     return tuners;
+  }
+
+  // Get channel key for a channel (number:name format)
+  getChannelKey(channel) {
+    return `${channel.number}:${channel.name}`;
   }
 
   // Get EPG status

@@ -323,11 +323,17 @@ class Tuner {
       throw new Error('Tuner not started');
     }
 
+    // Handle compound channelKey (number:name format) - extract channel number
+    let channelNumber = channelId;
+    if (String(channelId).includes(':')) {
+      channelNumber = String(channelId).split(':')[0];
+    }
+
     // Prioritize EPG data (dynamic, up-to-date channel names) over static channels.js
-    let channel = directvEpg.getChannelByNumber(channelId);
+    let channel = directvEpg.getChannel(channelId) || directvEpg.getChannelByNumber(channelNumber);
     if (!channel) {
       // Fall back to static channel definitions
-      channel = getChannel(channelId);
+      channel = getChannel(channelNumber);
     }
     if (!channel) {
       throw new Error(`Unknown channel: ${channelId}`);
@@ -335,7 +341,7 @@ class Tuner {
 
     console.log(`[tuner-${this.id}] Tuning to ${channel.name} (ch ${channel.number})...`);
     this.state = TunerState.TUNING;
-    this.currentChannel = channelId;
+    this.currentChannel = channelId;  // Store the full key for tracking
     this.lastActivity = Date.now();
 
     try {
@@ -828,8 +834,8 @@ class Tuner {
 
           // Check if this element contains our channel name AND "tune to channel"
           if (text.includes(channelLower) ||
-              (channelLower.includes('hits') && text.includes('hits hd')) ||
-              (channelLower.includes('cinemax') && text.includes(channelLower.replace(' ', '')))) {
+            (channelLower.includes('hits') && text.includes('hits hd')) ||
+            (channelLower.includes('cinemax') && text.includes(channelLower.replace(' ', '')))) {
 
             // Look for a clickable card container
             const card = el.closest('[class*="r-1loqt21"], [role="button"], [role="link"]');
@@ -852,7 +858,7 @@ class Tuner {
         for (const header of headers) {
           const headerText = header.textContent || '';
           if (headerText.includes(channelName) ||
-              (channelName.includes('Hits') && headerText.includes('Hits HD'))) {
+            (channelName.includes('Hits') && headerText.includes('Hits HD'))) {
             // Found channel name, look for nearby Tune to Channel
             const parent = header.closest('div[class*="r-"]');
             if (parent) {
@@ -915,7 +921,7 @@ class Tuner {
             const video = document.querySelector('video');
             if (video) {
               video.muted = false;
-              video.play().catch(() => {});
+              video.play().catch(() => { });
             }
           });
         }
@@ -1096,9 +1102,9 @@ class Tuner {
     if (this.browser) {
       if (config.getPlatform() === 'linux') {
         // In Docker, just disconnect - don't close the browser
-        await this.browser.close().catch(() => {});
+        await this.browser.close().catch(() => { });
       } else {
-        await this.browser.close().catch(() => {});
+        await this.browser.close().catch(() => { });
       }
       this.browser = null;
       this.page = null;
