@@ -8,6 +8,7 @@ const { chromium } = require('playwright');
 const DATA_DIR = path.join(__dirname, 'data');
 const CHANNELS_CACHE = path.join(DATA_DIR, 'directv_channels.json');
 const EPG_CACHE = path.join(DATA_DIR, 'directv_epg.json');
+const OVERRIDES_FILE = path.join(DATA_DIR, 'channel-overrides.json');
 
 // DirecTV API base
 const API_BASE = 'https://api.cld.dtvce.com';
@@ -34,7 +35,9 @@ class DirectvEpg {
     this.lastFetch = null;
     this.refreshTimer = null;
     this.isRefreshing = false;
+    this.overrides = {};          // Channel overrides: { channelId: { hidden, customName, customGroup } }
     this.loadCache();
+    this.loadOverrides();
   }
 
   // Start auto-refresh timer
@@ -114,6 +117,62 @@ class DirectvEpg {
     } catch (err) {
       console.error('[epg] Error saving cache:', err.message);
     }
+  }
+
+  // Load channel overrides from file
+  loadOverrides() {
+    try {
+      if (fs.existsSync(OVERRIDES_FILE)) {
+        this.overrides = JSON.parse(fs.readFileSync(OVERRIDES_FILE, 'utf8'));
+        console.log(`[epg] Loaded ${Object.keys(this.overrides).length} channel overrides`);
+      }
+    } catch (err) {
+      console.error('[epg] Error loading overrides:', err.message);
+      this.overrides = {};
+    }
+  }
+
+  // Save channel overrides to file
+  saveOverrides() {
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+      fs.writeFileSync(OVERRIDES_FILE, JSON.stringify(this.overrides, null, 2));
+      console.log('[epg] Overrides saved');
+    } catch (err) {
+      console.error('[epg] Error saving overrides:', err.message);
+    }
+  }
+
+  // Set override for a channel
+  setOverride(channelId, override) {
+    this.overrides[channelId] = { ...this.overrides[channelId], ...override };
+    this.saveOverrides();
+    return this.overrides[channelId];
+  }
+
+  // Remove override for a channel
+  removeOverride(channelId) {
+    delete this.overrides[channelId];
+    this.saveOverrides();
+  }
+
+  // Get all overrides
+  getOverrides() {
+    return this.overrides;
+  }
+
+  // Get channel with overrides applied
+  getChannelWithOverrides(channel) {
+    const override = this.overrides[channel.id] || {};
+    return {
+      ...channel,
+      name: override.customName || channel.name,
+      group: override.customGroup || this.getChannelGroup(channel),
+      hidden: override.hidden || false,
+      hasOverride: !!this.overrides[channel.id]
+    };
   }
 
   // Fetch channels and EPG via browser CDP (uses authenticated session)
@@ -434,15 +493,25 @@ class DirectvEpg {
 
   // Generate M3U playlist with tvg-id matching EPG
   // Uses channel ID in URLs to handle channels with same number (e.g., NESN/NESN+)
+  // Applies channel overrides (custom names, groups, hidden)
   generateM3U(host) {
     let m3u = '#EXTM3U url-tvg="http://' + host + '/tve/directv/epg.xml"\n\n';
 
     for (const channel of this.channels) {
+      // Apply overrides
+      const override = this.overrides[channel.id] || {};
+
+      // Skip hidden channels
+      if (override.hidden) continue;
+
+      // Use custom name/group if set
+      const displayName = override.customName || channel.name;
+      const groupTitle = override.customGroup || this.getChannelGroup(channel);
+
       // Use channel ID for unique tvg-id (handles same-number channels)
       const tvgId = `dtv-${channel.id}`;
-      const groupTitle = this.getChannelGroup(channel);
 
-      m3u += `#EXTINF:-1 tvg-id="${tvgId}" tvg-name="${channel.name}" tvg-logo="${channel.logo || ''}" tvg-chno="${channel.number}" group-title="${groupTitle}",${channel.name}\n`;
+      m3u += `#EXTINF:-1 tvg-id="${tvgId}" tvg-name="${displayName}" tvg-logo="${channel.logo || ''}" tvg-chno="${channel.number}" group-title="${groupTitle}",${displayName}\n`;
       // Use channel ID in URL to uniquely identify the channel
       m3u += `http://${host}/stream/${encodeURIComponent(channel.id)}\n\n`;
     }

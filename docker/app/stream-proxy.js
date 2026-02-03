@@ -228,6 +228,58 @@ app.post('/api/settings/reset', (req, res) => {
   }
 });
 
+// ============================================
+// Channel Overrides API
+// ============================================
+
+// Get all channels with overrides applied
+app.get('/api/channels', (req, res) => {
+  try {
+    const channels = directvEpg.getChannels().map(ch =>
+      directvEpg.getChannelWithOverrides(ch)
+    );
+    res.json({
+      channels,
+      overrides: directvEpg.getOverrides(),
+      groups: ['Sports', 'News', 'Movies', 'Kids', 'Documentary', 'Entertainment']
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Set override for a channel
+app.post('/api/channels/override', (req, res) => {
+  try {
+    const { channelId, hidden, customName, customGroup } = req.body;
+    if (!channelId) {
+      return res.status(400).json({ error: 'channelId is required' });
+    }
+
+    const override = {};
+    if (hidden !== undefined) override.hidden = hidden;
+    if (customName !== undefined) override.customName = customName || null;
+    if (customGroup !== undefined) override.customGroup = customGroup || null;
+
+    const result = directvEpg.setOverride(channelId, override);
+    res.json({ success: true, override: result });
+  } catch (err) {
+    console.error('[server] Failed to set override:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Remove override for a channel
+app.delete('/api/channels/override/:channelId', (req, res) => {
+  try {
+    const { channelId } = req.params;
+    directvEpg.removeOverride(channelId);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get available presets
 app.get('/api/presets', (req, res) => {
   res.json(getPresets());

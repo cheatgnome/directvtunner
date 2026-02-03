@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,6 +8,7 @@
   <link rel="stylesheet" href="style.css">
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
+
 <body>
   <div class="container" x-data="settingsApp()" x-init="init()">
     <header>
@@ -19,10 +21,13 @@
       <p class="subtitle">Configure video quality and streaming options</p>
 
       <!-- System Status Banner -->
-      <div class="system-banner" :class="{ 'ready': systemStatus.system.ready, 'not-ready': !systemStatus.system.ready }" x-show="systemStatus.system.message">
+      <div class="system-banner"
+        :class="{ 'ready': systemStatus.system.ready, 'not-ready': !systemStatus.system.ready }"
+        x-show="systemStatus.system.message">
         <span class="status-icon" x-text="systemStatus.system.ready ? '✓' : '⏳'"></span>
         <span class="status-text" x-text="systemStatus.system.message"></span>
-        <button class="btn-small" x-show="!systemStatus.system.ready && systemStatus.login.needsLogin" @click="openVNC()">Open noVNC</button>
+        <button class="btn-small" x-show="!systemStatus.system.ready && systemStatus.login.needsLogin"
+          @click="openVNC()">Open noVNC</button>
       </div>
 
       <!-- Playlist URLs -->
@@ -61,11 +66,7 @@
       <h2>Quick Presets</h2>
       <div class="presets-grid">
         <template x-for="preset in presets" :key="preset.id">
-          <button
-            class="preset-card"
-            :class="{ 'active': activePreset === preset.id }"
-            @click="applyPreset(preset.id)"
-          >
+          <button class="preset-card" :class="{ 'active': activePreset === preset.id }" @click="applyPreset(preset.id)">
             <span class="preset-name" x-text="preset.name"></span>
             <span class="preset-desc" x-text="preset.description"></span>
           </button>
@@ -75,34 +76,16 @@
 
     <!-- Tabs -->
     <nav class="tabs">
-      <button
-        :class="{ 'active': activeTab === 'video' }"
-        @click="activeTab = 'video'"
-      >Video</button>
-      <button
-        :class="{ 'active': activeTab === 'audio' }"
-        @click="activeTab = 'audio'"
-      >Audio</button>
-      <button
-        :class="{ 'active': activeTab === 'streaming' }"
-        @click="activeTab = 'streaming'"
-      >Streaming</button>
-      <button
-        :class="{ 'active': activeTab === 'encoding' }"
-        @click="activeTab = 'encoding'"
-      >Encoding</button>
-      <button
-        :class="{ 'active': activeTab === 'system' }"
-        @click="activeTab = 'system'"
-      >System</button>
-      <button
-        :class="{ 'active': activeTab === 'logs' }"
-        @click="activeTab = 'logs'; if(!logsStarted) startLogs()"
-      >Logs</button>
-      <button
-        :class="{ 'active': activeTab === 'status' }"
-        @click="activeTab = 'status'; loadStatus()"
-      >Status</button>
+      <button :class="{ 'active': activeTab === 'video' }" @click="activeTab = 'video'">Video</button>
+      <button :class="{ 'active': activeTab === 'audio' }" @click="activeTab = 'audio'">Audio</button>
+      <button :class="{ 'active': activeTab === 'streaming' }" @click="activeTab = 'streaming'">Streaming</button>
+      <button :class="{ 'active': activeTab === 'encoding' }" @click="activeTab = 'encoding'">Encoding</button>
+      <button :class="{ 'active': activeTab === 'system' }" @click="activeTab = 'system'">System</button>
+      <button :class="{ 'active': activeTab === 'channels' }"
+        @click="activeTab = 'channels'; loadChannels()">Channels</button>
+      <button :class="{ 'active': activeTab === 'logs' }"
+        @click="activeTab = 'logs'; if(!logsStarted) startLogs()">Logs</button>
+      <button :class="{ 'active': activeTab === 'status' }" @click="activeTab = 'status'; loadStatus()">Status</button>
     </nav>
 
     <!-- Tab Content -->
@@ -111,39 +94,22 @@
       <div x-show="activeTab === 'video'" class="tab-panel">
         <div class="form-group">
           <label for="video-width">Resolution Width</label>
-          <input
-            type="number"
-            id="video-width"
-            x-model.number="settings.video.resolution.width"
-            min="640"
-            max="3840"
-            @input="markDirty()"
-          >
+          <input type="number" id="video-width" x-model.number="settings.video.resolution.width" min="640" max="3840"
+            @input="markDirty()">
           <span class="hint">pixels (640-3840)</span>
         </div>
 
         <div class="form-group">
           <label for="video-height">Resolution Height</label>
-          <input
-            type="number"
-            id="video-height"
-            x-model.number="settings.video.resolution.height"
-            min="360"
-            max="2160"
-            @input="markDirty()"
-          >
+          <input type="number" id="video-height" x-model.number="settings.video.resolution.height" min="360" max="2160"
+            @input="markDirty()">
           <span class="hint">pixels (360-2160)</span>
         </div>
 
         <div class="form-group">
           <label for="video-bitrate">Video Bitrate</label>
-          <input
-            type="text"
-            id="video-bitrate"
-            x-model="settings.video.bitrate"
-            placeholder="e.g., 4M or 2500k"
-            @input="markDirty()"
-          >
+          <input type="text" id="video-bitrate" x-model="settings.video.bitrate" placeholder="e.g., 4M or 2500k"
+            @input="markDirty()">
           <span class="hint">e.g., 2M, 4M, 6M, 2500k</span>
         </div>
       </div>
@@ -152,13 +118,8 @@
       <div x-show="activeTab === 'audio'" class="tab-panel">
         <div class="form-group">
           <label for="audio-bitrate">Audio Bitrate</label>
-          <input
-            type="text"
-            id="audio-bitrate"
-            x-model="settings.audio.bitrate"
-            placeholder="e.g., 128k"
-            @input="markDirty()"
-          >
+          <input type="text" id="audio-bitrate" x-model="settings.audio.bitrate" placeholder="e.g., 128k"
+            @input="markDirty()">
           <span class="hint">e.g., 96k, 128k, 192k</span>
         </div>
       </div>
@@ -167,27 +128,15 @@
       <div x-show="activeTab === 'streaming'" class="tab-panel">
         <div class="form-group">
           <label for="hls-segment">HLS Segment Time</label>
-          <input
-            type="number"
-            id="hls-segment"
-            x-model.number="settings.hls.segmentTime"
-            min="1"
-            max="10"
-            @input="markDirty()"
-          >
+          <input type="number" id="hls-segment" x-model.number="settings.hls.segmentTime" min="1" max="10"
+            @input="markDirty()">
           <span class="hint">seconds per segment (1-10)</span>
         </div>
 
         <div class="form-group">
           <label for="hls-list">HLS List Size</label>
-          <input
-            type="number"
-            id="hls-list"
-            x-model.number="settings.hls.listSize"
-            min="3"
-            max="20"
-            @input="markDirty()"
-          >
+          <input type="number" id="hls-list" x-model.number="settings.hls.listSize" min="3" max="20"
+            @input="markDirty()">
           <span class="hint">segments in playlist (3-20)</span>
         </div>
       </div>
@@ -195,17 +144,15 @@
       <!-- Encoding Tab -->
       <div x-show="activeTab === 'encoding'" class="tab-panel">
         <div class="settings-info">
-          <p><strong>Advanced Encoding Settings</strong> - Adjust these to reduce video stuttering and improve playback quality.</p>
-          <p class="info-note">⚠️ Changes require restarting the stream to take effect. If you experience issues, try "Reset to Defaults".</p>
+          <p><strong>Advanced Encoding Settings</strong> - Adjust these to reduce video stuttering and improve playback
+            quality.</p>
+          <p class="info-note">⚠️ Changes require restarting the stream to take effect. If you experience issues, try
+            "Reset to Defaults".</p>
         </div>
 
         <div class="form-group">
           <label for="enc-buffer">Buffer Size</label>
-          <select
-            id="enc-buffer"
-            x-model="settings.encoding.bufferSize"
-            @change="markDirty()"
-          >
+          <select id="enc-buffer" x-model="settings.encoding.bufferSize" @change="markDirty()">
             <option value="2M">2M (Low - Less latency, may stutter)</option>
             <option value="4M">4M (Medium)</option>
             <option value="8M">8M (High - Recommended)</option>
@@ -213,106 +160,93 @@
             <option value="16M">16M (Maximum - Highest stability)</option>
           </select>
           <div class="setting-help">
-            <strong>What it does:</strong> Controls the encoder's rate control buffer. Larger buffers allow the encoder to smooth out bitrate spikes, reducing stuttering on complex scenes.<br>
-            <strong>Best practice:</strong> Start with 8M (recommended). If you see stuttering on movie channels (Cinemax, HBO), try 12M or 16M. Lower values reduce latency but may cause stuttering.
+            <strong>What it does:</strong> Controls the encoder's rate control buffer. Larger buffers allow the encoder
+            to smooth out bitrate spikes, reducing stuttering on complex scenes.<br>
+            <strong>Best practice:</strong> Start with 8M (recommended). If you see stuttering on movie channels
+            (Cinemax, HBO), try 12M or 16M. Lower values reduce latency but may cause stuttering.
           </div>
         </div>
 
         <div class="form-group">
           <label for="enc-queue">Thread Queue Size</label>
-          <select
-            id="enc-queue"
-            x-model.number="settings.encoding.threadQueueSize"
-            @change="markDirty()"
-          >
+          <select id="enc-queue" x-model.number="settings.encoding.threadQueueSize" @change="markDirty()">
             <option value="512">512 (Low - Less memory)</option>
             <option value="1024">1024 (Default)</option>
             <option value="2048">2048 (Recommended)</option>
             <option value="4096">4096 (High - For slow systems)</option>
           </select>
           <div class="setting-help">
-            <strong>What it does:</strong> Sets how many frames FFmpeg can buffer from the screen capture before encoding. Higher values prevent frame drops when encoding is momentarily slow.<br>
-            <strong>Best practice:</strong> Use 2048 for most systems. If using software encoding (libx264) and experiencing drops, try 4096. Lower values use less memory.
+            <strong>What it does:</strong> Sets how many frames FFmpeg can buffer from the screen capture before
+            encoding. Higher values prevent frame drops when encoding is momentarily slow.<br>
+            <strong>Best practice:</strong> Use 2048 for most systems. If using software encoding (libx264) and
+            experiencing drops, try 4096. Lower values use less memory.
           </div>
         </div>
 
         <div class="form-group">
           <label for="enc-probe">Probe Size</label>
-          <select
-            id="enc-probe"
-            x-model="settings.encoding.probeSize"
-            @change="markDirty()"
-          >
+          <select id="enc-probe" x-model="settings.encoding.probeSize" @change="markDirty()">
             <option value="5M">5M (Fast startup)</option>
             <option value="10M">10M (Recommended)</option>
             <option value="20M">20M (Better analysis)</option>
           </select>
           <div class="setting-help">
-            <strong>What it does:</strong> Amount of data FFmpeg analyzes when starting a stream to detect format and timing information.<br>
-            <strong>Best practice:</strong> 10M works well for most cases. Use 5M if you want faster channel switching. Use 20M if streams have sync issues at startup.
+            <strong>What it does:</strong> Amount of data FFmpeg analyzes when starting a stream to detect format and
+            timing information.<br>
+            <strong>Best practice:</strong> 10M works well for most cases. Use 5M if you want faster channel switching.
+            Use 20M if streams have sync issues at startup.
           </div>
         </div>
 
         <div class="form-group">
           <label for="enc-vsync">Video Sync Mode</label>
-          <select
-            id="enc-vsync"
-            x-model="settings.encoding.vsync"
-            @change="markDirty()"
-          >
+          <select id="enc-vsync" x-model="settings.encoding.vsync" @change="markDirty()">
             <option value="cfr">CFR (Constant Frame Rate - Recommended)</option>
             <option value="vfr">VFR (Variable Frame Rate)</option>
             <option value="passthrough">Passthrough (No adjustment)</option>
           </select>
           <div class="setting-help">
-            <strong>What it does:</strong> Controls how FFmpeg handles frame timing. CFR duplicates/drops frames to maintain constant 30fps. VFR preserves original timing.<br>
-            <strong>Best practice:</strong> Use CFR for best compatibility with DVR software (Channels DVR, Plex). Try VFR only if CFR causes stuttering - note that some players don't handle VFR well.
+            <strong>What it does:</strong> Controls how FFmpeg handles frame timing. CFR duplicates/drops frames to
+            maintain constant 30fps. VFR preserves original timing.<br>
+            <strong>Best practice:</strong> Use CFR for best compatibility with DVR software (Channels DVR, Plex). Try
+            VFR only if CFR causes stuttering - note that some players don't handle VFR well.
           </div>
         </div>
 
         <div class="form-group">
           <label for="enc-gop">GOP Size (Keyframe Interval)</label>
-          <input
-            type="number"
-            id="enc-gop"
-            x-model.number="settings.encoding.gopSize"
-            min="30"
-            max="300"
-            @input="markDirty()"
-          >
+          <input type="number" id="enc-gop" x-model.number="settings.encoding.gopSize" min="30" max="300"
+            @input="markDirty()">
           <div class="setting-help">
-            <strong>What it does:</strong> Number of frames between keyframes (I-frames). At 30fps: GOP 60 = keyframe every 2 seconds, GOP 30 = every 1 second.<br>
-            <strong>Best practice:</strong> 60 (2 sec) is ideal for live streaming. Lower values (30) improve seeking but increase file size. Higher values (120+) reduce quality and make seeking slower.
+            <strong>What it does:</strong> Number of frames between keyframes (I-frames). At 30fps: GOP 60 = keyframe
+            every 2 seconds, GOP 30 = every 1 second.<br>
+            <strong>Best practice:</strong> 60 (2 sec) is ideal for live streaming. Lower values (30) improve seeking
+            but increase file size. Higher values (120+) reduce quality and make seeking slower.
           </div>
         </div>
 
         <div class="form-group checkbox-group">
           <label>
-            <input
-              type="checkbox"
-              x-model="settings.encoding.lowLatency"
-              @change="markDirty()"
-            >
+            <input type="checkbox" x-model="settings.encoding.lowLatency" @change="markDirty()">
             Low Latency Mode
           </label>
           <div class="setting-help">
-            <strong>What it does:</strong> Enables "zerolatency" tuning for libx264 encoder, which disables features that add delay (B-frames, lookahead).<br>
-            <strong>Best practice:</strong> Keep enabled for live TV. Only disable if you prioritize quality over latency (e.g., recording for later viewing). Has no effect on hardware encoders (NVENC/VAAPI).
+            <strong>What it does:</strong> Enables "zerolatency" tuning for libx264 encoder, which disables features
+            that add delay (B-frames, lookahead).<br>
+            <strong>Best practice:</strong> Keep enabled for live TV. Only disable if you prioritize quality over
+            latency (e.g., recording for later viewing). Has no effect on hardware encoders (NVENC/VAAPI).
           </div>
         </div>
 
         <div class="form-group checkbox-group">
           <label>
-            <input
-              type="checkbox"
-              x-model="settings.encoding.drawMouse"
-              @change="markDirty()"
-            >
+            <input type="checkbox" x-model="settings.encoding.drawMouse" @change="markDirty()">
             Capture Mouse Cursor
           </label>
           <div class="setting-help">
             <strong>What it does:</strong> Includes the mouse cursor in the captured video.<br>
-            <strong>Best practice:</strong> Keep disabled. Only enable for debugging or if you need to see cursor movements in the stream.
+            <strong>Best practice:</strong> Keep disabled. Only enable for debugging or if you need to see cursor
+            movements in the stream.
           </div>
         </div>
 
@@ -330,15 +264,68 @@
       <div x-show="activeTab === 'system'" class="tab-panel">
         <div class="form-group">
           <label for="epg-interval">EPG Refresh Interval</label>
-          <input
-            type="number"
-            id="epg-interval"
-            x-model.number="settings.epg.refreshInterval"
-            min="1"
-            max="24"
-            @input="markDirty()"
-          >
+          <input type="number" id="epg-interval" x-model.number="settings.epg.refreshInterval" min="1" max="24"
+            @input="markDirty()">
           <span class="hint">hours (1-24)</span>
+        </div>
+      </div>
+
+      <!-- Channels Tab -->
+      <div x-show="activeTab === 'channels'" class="tab-panel channels-panel">
+        <div class="channels-header">
+          <div class="channels-search">
+            <input type="text" placeholder="Search channels..." x-model="channelSearch" class="search-input">
+          </div>
+          <div class="channels-stats">
+            <span x-text="filteredChannels.length + ' of ' + channelsList.length + ' channels'"></span>
+            <span x-show="hiddenCount > 0" class="hidden-count" x-text="'(' + hiddenCount + ' hidden)'"></span>
+          </div>
+        </div>
+
+        <div class="channels-table-container">
+          <table class="channels-table">
+            <thead>
+              <tr>
+                <th class="col-num">#</th>
+                <th class="col-name">Name</th>
+                <th class="col-group">Group</th>
+                <th class="col-hidden">Hidden</th>
+                <th class="col-actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="channel in filteredChannels" :key="channel.id">
+                <tr :class="{ 'channel-hidden': channel.hidden, 'channel-modified': channel.hasOverride }">
+                  <td class="col-num" x-text="channel.number"></td>
+                  <td class="col-name">
+                    <input type="text" :value="channel.name"
+                      @blur="updateChannelName(channel.id, $event.target.value, channel.name)"
+                      @keydown.enter="$event.target.blur()" class="channel-name-input">
+                  </td>
+                  <td class="col-group">
+                    <select :value="channel.group" @change="updateChannelGroup(channel.id, $event.target.value)"
+                      class="channel-group-select">
+                      <template x-for="group in availableGroups" :key="group">
+                        <option :value="group" x-text="group" :selected="channel.group === group"></option>
+                      </template>
+                    </select>
+                  </td>
+                  <td class="col-hidden">
+                    <input type="checkbox" :checked="channel.hidden"
+                      @change="toggleChannelHidden(channel.id, $event.target.checked)">
+                  </td>
+                  <td class="col-actions">
+                    <button class="btn-tiny" x-show="channel.hasOverride" @click="resetChannelOverride(channel.id)"
+                      title="Reset to default">↺</button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="channels-actions">
+          <button class="btn-small" @click="loadChannels()">Refresh List</button>
         </div>
       </div>
 
@@ -347,26 +334,14 @@
         <div class="logs-toolbar">
           <div class="log-filters">
             <label class="filter-label">Filter:</label>
-            <button
-              class="filter-btn"
-              :class="{ 'active': logFilter === 'all' }"
-              @click="logFilter = 'all'"
-            >All</button>
-            <button
-              class="filter-btn"
-              :class="{ 'active': logFilter === 'info' }"
-              @click="logFilter = 'info'"
-            >Info</button>
-            <button
-              class="filter-btn"
-              :class="{ 'active': logFilter === 'error' }"
-              @click="logFilter = 'error'"
-            >Error</button>
-            <button
-              class="filter-btn"
-              :class="{ 'active': logFilter === 'debug' }"
-              @click="logFilter = 'debug'"
-            >Debug</button>
+            <button class="filter-btn" :class="{ 'active': logFilter === 'all' }"
+              @click="logFilter = 'all'">All</button>
+            <button class="filter-btn" :class="{ 'active': logFilter === 'info' }"
+              @click="logFilter = 'info'">Info</button>
+            <button class="filter-btn" :class="{ 'active': logFilter === 'error' }"
+              @click="logFilter = 'error'">Error</button>
+            <button class="filter-btn" :class="{ 'active': logFilter === 'debug' }"
+              @click="logFilter = 'debug'">Debug</button>
           </div>
           <div class="logs-actions">
             <button class="btn-small" @click="clearLogs()">Clear</button>
@@ -416,7 +391,9 @@
                 x-text="systemStatus.system.browserReady ? 'Running' : 'Not Ready'"></span>
             </div>
             <div class="status-body">
-              <p x-text="systemStatus.system.browserReady ? 'Chrome is running normally' : 'Chrome may need to be reset'"></p>
+              <p
+                x-text="systemStatus.system.browserReady ? 'Chrome is running normally' : 'Chrome may need to be reset'">
+              </p>
               <div class="button-row">
                 <button class="btn-small btn-vnc-small" @click="openVNC()">Open noVNC</button>
                 <button class="btn-small btn-warning" @click="resetChrome()" :disabled="resettingChrome">
@@ -447,7 +424,8 @@
           <div class="status-card">
             <div class="status-header">
               <h3>Tuners</h3>
-              <span class="badge badge-ok" x-text="systemStatus.tuners.active + '/' + systemStatus.tuners.total + ' ACTIVE'"></span>
+              <span class="badge badge-ok"
+                x-text="systemStatus.tuners.active + '/' + systemStatus.tuners.total + ' ACTIVE'"></span>
             </div>
             <div class="status-body">
               <div class="tuner-legend">
@@ -461,7 +439,8 @@
                 <div class="tuner-item">
                   <span class="tuner-id">
                     <span x-text="'Tuner ' + tuner.id"></span>
-                    <span class="login-dot" :class="tuner.loggedIn ? 'logged-in' : 'needs-login'" :title="tuner.loggedIn ? 'Logged in' : 'Needs login'"></span>
+                    <span class="login-dot" :class="tuner.loggedIn ? 'logged-in' : 'needs-login'"
+                      :title="tuner.loggedIn ? 'Logged in' : 'Needs login'"></span>
                   </span>
                   <span class="tuner-channel" x-show="tuner.streaming">
                     <span class="channel-num" x-text="tuner.channel"></span>
@@ -474,7 +453,8 @@
                     <button class="btn-tiny btn-reset-tuner" @click="resetTuner(tuner.id)" title="Reset this tuner">
                       ↺
                     </button>
-                    <button class="btn-tiny btn-cache-tuner" @click="clearCache(tuner.id)" title="Clear Chrome cache (fixes streaming limit errors)">
+                    <button class="btn-tiny btn-cache-tuner" @click="clearCache(tuner.id)"
+                      title="Clear Chrome cache (fixes streaming limit errors)">
                       🗑
                     </button>
                     <button class="btn-tiny btn-vnc-tuner" @click="openVNC(tuner.id)" title="Open noVNC for this tuner">
@@ -517,22 +497,26 @@
                     <div class="gpu-stat">
                       <label>Encoder</label>
                       <div class="progress-bar">
-                        <div class="progress-fill encoder" :style="'width: ' + gpuStatus.nvidia.utilization.encoder + '%'"></div>
+                        <div class="progress-fill encoder"
+                          :style="'width: ' + gpuStatus.nvidia.utilization.encoder + '%'"></div>
                       </div>
                       <span class="stat-value" x-text="gpuStatus.nvidia.utilization.encoder + '%'"></span>
                     </div>
                     <div class="gpu-stat">
                       <label>VRAM</label>
                       <div class="progress-bar">
-                        <div class="progress-fill memory" :style="'width: ' + gpuStatus.nvidia.memory.usedPercent + '%'"></div>
+                        <div class="progress-fill memory"
+                          :style="'width: ' + gpuStatus.nvidia.memory.usedPercent + '%'"></div>
                       </div>
-                      <span class="stat-value" x-text="gpuStatus.nvidia.memory.used + ' / ' + gpuStatus.nvidia.memory.total + ' MB'"></span>
+                      <span class="stat-value"
+                        x-text="gpuStatus.nvidia.memory.used + ' / ' + gpuStatus.nvidia.memory.total + ' MB'"></span>
                     </div>
                   </div>
                   <div class="gpu-details">
                     <span class="gpu-detail">
                       <span class="detail-label">Temp:</span>
-                      <span class="detail-value" :class="gpuStatus.nvidia.temperature > 80 ? 'hot' : ''" x-text="gpuStatus.nvidia.temperature + '°C'"></span>
+                      <span class="detail-value" :class="gpuStatus.nvidia.temperature > 80 ? 'hot' : ''"
+                        x-text="gpuStatus.nvidia.temperature + '°C'"></span>
                     </span>
                     <span class="gpu-detail">
                       <span class="detail-label">Power:</span>
@@ -549,7 +533,8 @@
                   </div>
                   <div class="gpu-encoder-info" x-show="gpuStatus.nvencSettings">
                     <span class="encoder-label">NVENC:</span>
-                    <span class="encoder-setting">Preset: <strong x-text="gpuStatus.nvencSettings?.preset"></strong></span>
+                    <span class="encoder-setting">Preset: <strong
+                        x-text="gpuStatus.nvencSettings?.preset"></strong></span>
                     <span class="encoder-setting">Tune: <strong x-text="gpuStatus.nvencSettings?.tune"></strong></span>
                     <span class="encoder-setting">RC: <strong x-text="gpuStatus.nvencSettings?.rc"></strong></span>
                   </div>
@@ -576,9 +561,11 @@
                       <div class="stat-row">
                         <label>Memory</label>
                         <div class="progress-bar">
-                          <div class="progress-fill memory" :style="'width: ' + gpuStatus.cpu.memory.usedPercent + '%'"></div>
+                          <div class="progress-fill memory" :style="'width: ' + gpuStatus.cpu.memory.usedPercent + '%'">
+                          </div>
                         </div>
-                        <span class="stat-value" x-text="gpuStatus.cpu.memory.used.toFixed(1) + ' / ' + gpuStatus.cpu.memory.total.toFixed(1) + ' GB'"></span>
+                        <span class="stat-value"
+                          x-text="gpuStatus.cpu.memory.used.toFixed(1) + ' / ' + gpuStatus.cpu.memory.total.toFixed(1) + ' GB'"></span>
                       </div>
                       <div class="gpu-details">
                         <div class="detail-item">
@@ -632,28 +619,20 @@
 
     <!-- Actions -->
     <footer class="actions" x-show="activeTab !== 'logs'">
-      <button
-        class="btn-save"
-        :disabled="!isDirty || saving"
-        @click="saveSettings()"
-      >
+      <button class="btn-save" :disabled="!isDirty || saving" @click="saveSettings()">
         <span x-show="!saving">Save Settings</span>
         <span x-show="saving">Saving...</span>
       </button>
-      <button
-        class="btn-reset"
-        @click="resetToDefaults()"
-      >Reset to Defaults</button>
+      <button class="btn-reset" @click="resetToDefaults()">Reset to Defaults</button>
     </footer>
 
     <!-- Toast Notification -->
-    <div
-      class="toast"
+    <div class="toast"
       :class="{ 'show': toast.show, 'error': toast.type === 'error', 'success': toast.type === 'success' }"
-      x-text="toast.message"
-    ></div>
+      x-text="toast.message"></div>
   </div>
 
   <script src="app.js"></script>
 </body>
+
 </html>

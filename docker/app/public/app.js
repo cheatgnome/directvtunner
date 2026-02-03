@@ -111,6 +111,27 @@ function settingsApp() {
     },
     gpuInterval: null,
 
+    // Channel management
+    channelsList: [],
+    channelSearch: '',
+    availableGroups: ['Sports', 'News', 'Movies', 'Kids', 'Documentary', 'Entertainment'],
+
+    // Computed: filtered channels based on search
+    get filteredChannels() {
+      if (!this.channelSearch) return this.channelsList;
+      const search = this.channelSearch.toLowerCase();
+      return this.channelsList.filter(ch =>
+        ch.name.toLowerCase().includes(search) ||
+        ch.number.toString().includes(search) ||
+        ch.group.toLowerCase().includes(search)
+      );
+    },
+
+    // Computed: count of hidden channels
+    get hiddenCount() {
+      return this.channelsList.filter(ch => ch.hidden).length;
+    },
+
     async init() {
       await this.loadVersion();
       await this.loadStatus();
@@ -562,6 +583,98 @@ function settingsApp() {
       if (this.statusInterval) {
         clearInterval(this.statusInterval);
         this.statusInterval = null;
+      }
+    },
+
+    // Channel management functions
+    async loadChannels() {
+      try {
+        const res = await fetch('/api/channels');
+        if (res.ok) {
+          const data = await res.json();
+          this.channelsList = data.channels || [];
+          if (data.groups) {
+            this.availableGroups = data.groups;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load channels:', err);
+        this.showToast('Failed to load channels', 'error');
+      }
+    },
+
+    async updateChannelName(channelId, newName, originalName) {
+      if (newName === originalName) return;
+      try {
+        const res = await fetch('/api/channels/override', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channelId, customName: newName || null })
+        });
+        if (res.ok) {
+          await this.loadChannels();
+          this.showToast('Channel name updated', 'success');
+        } else {
+          this.showToast('Failed to update channel name', 'error');
+        }
+      } catch (err) {
+        console.error('Failed to update channel name:', err);
+        this.showToast('Failed to update channel name', 'error');
+      }
+    },
+
+    async updateChannelGroup(channelId, newGroup) {
+      try {
+        const res = await fetch('/api/channels/override', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channelId, customGroup: newGroup })
+        });
+        if (res.ok) {
+          await this.loadChannels();
+          this.showToast('Channel group updated', 'success');
+        } else {
+          this.showToast('Failed to update channel group', 'error');
+        }
+      } catch (err) {
+        console.error('Failed to update channel group:', err);
+        this.showToast('Failed to update channel group', 'error');
+      }
+    },
+
+    async toggleChannelHidden(channelId, hidden) {
+      try {
+        const res = await fetch('/api/channels/override', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channelId, hidden })
+        });
+        if (res.ok) {
+          await this.loadChannels();
+          this.showToast(hidden ? 'Channel hidden' : 'Channel visible', 'success');
+        } else {
+          this.showToast('Failed to update channel visibility', 'error');
+        }
+      } catch (err) {
+        console.error('Failed to toggle channel visibility:', err);
+        this.showToast('Failed to update channel visibility', 'error');
+      }
+    },
+
+    async resetChannelOverride(channelId) {
+      try {
+        const res = await fetch(`/api/channels/override/${encodeURIComponent(channelId)}`, {
+          method: 'DELETE'
+        });
+        if (res.ok) {
+          await this.loadChannels();
+          this.showToast('Channel reset to default', 'success');
+        } else {
+          this.showToast('Failed to reset channel', 'error');
+        }
+      } catch (err) {
+        console.error('Failed to reset channel:', err);
+        this.showToast('Failed to reset channel', 'error');
       }
     }
   };
