@@ -311,29 +311,6 @@
             </div>
           </div>
 
-          <!-- CinemaOS Status -->
-          <div class="status-card">
-            <div class="status-header">
-              <h3>CinemaOS Movies</h3>
-              <span class="badge" :class="systemStatus.cinemaos.available ? 'badge-ok' : 'badge-off'"
-                x-text="systemStatus.cinemaos.available ? 'Available' : 'N/A'"></span>
-            </div>
-            <div class="status-body">
-              <p x-text="systemStatus.cinemaos.movieCount + ' movies indexed'"></p>
-            </div>
-          </div>
-
-          <!-- TV Shows Status -->
-          <div class="status-card">
-            <div class="status-header">
-              <h3>TV Shows</h3>
-              <span class="badge" :class="systemStatus.tv.available ? 'badge-ok' : 'badge-off'"
-                x-text="systemStatus.tv.available ? 'Available' : 'N/A'"></span>
-            </div>
-            <div class="status-body">
-              <p x-text="systemStatus.tv.showCount + ' shows indexed'"></p>
-            </div>
-          </div>
 
           <!-- Automations Status -->
           <div class="status-card status-card-wide">

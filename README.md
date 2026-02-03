@@ -15,25 +15,6 @@ A Docker-based IPTV proxy that turns DirecTV Stream into an M3U playlist compati
 - **EPG (Electronic Program Guide)**: Full XMLTV EPG with 830+ channels
 - **Auto-refresh EPG**: Automatically updates every 4 hours
 
-### CinemaOS Movies (23,000+ Movies)
-- **Massive Movie Library**: 23,000+ deduplicated movies from CinemaOS
-- **Auto-refresh Database**: Automatically scans for new movies every 6 hours
-- **Incremental Updates**: Only fetches new content (efficient)
-- **Full Metadata**: Posters, ratings, genres, year, overview
-- **VOD with Pause/Rewind**: Native HLS playback support
-- **Direct API Integration**: Uses CinemaOS scraper API for stream URLs
-
-### Cineby TV Shows (3,000+ Shows) - NEW!
-- **Extensive TV Library**: 3,000+ TV shows from TMDB
-- **Auto-refresh Database**: Automatically scans for new shows every 1 hour
-- **Hourly Updates**: TV shows update more frequently for new episodes
-- **Full Metadata**: Posters, ratings, genres, year, overview
-- **Categories**: Popular, Top Rated, On The Air, Airing Today
-- **Direct Streaming**: Uses CinemaOS scraper API for stream URLs
-
-### Additional VOD Providers
-- **Cineby**: Additional movie source with browser-based extraction
-
 ---
 
 ## Docker Hub
@@ -305,76 +286,16 @@ The web GUI (Status tab) shows real-time GPU stats:
 | `GET /tve/directv/epg/status` | EPG refresh status |
 | `POST /tve/directv/epg/refresh` | Manual EPG refresh |
 
-### CinemaOS Movies (23,000+)
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /cinemaos/playlist.m3u` | M3U playlist with all movies |
-| `GET /cinemaos/stats` | Database statistics |
-| `GET /cinemaos/auto-refresh/status` | Auto-refresh status |
-| `POST /cinemaos/auto-refresh/start?hours=6` | Start/change auto-refresh interval |
-| `POST /cinemaos/auto-refresh/stop` | Stop auto-refresh |
-| `POST /cinemaos/update` | Manual incremental update |
-| `POST /cinemaos/fetch-full` | Full database refresh (30-60 min) |
-| `POST /cinemaos/generate-playlist` | Regenerate M3U playlist |
-
-### VOD Streaming (Unified)
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /vod/providers` | List all VOD providers |
-| `GET /vod/:provider/catalog` | Provider movie catalog |
-| `GET /vod/:provider/:contentId/stream` | Stream a movie |
-| `GET /vod/:provider/playlist.m3u` | Provider-specific M3U |
-| `GET /vod/combined-playlist.m3u` | Combined M3U from all providers |
-
-### Cineby Movies
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /cineby-playlist.m3u` | Cineby movies M3U |
-| `GET /cineby/movies` | List all Cineby movies |
-| `GET /cineby/:movieId/stream` | Stream a Cineby movie |
-
-### Cineby TV Shows (3,000+)
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /tv/playlist.m3u` | M3U playlist with all TV shows |
-| `GET /tv/stats` | Database statistics |
-| `GET /tv/auto-refresh/status` | Auto-refresh status |
-| `POST /tv/auto-refresh/start?hours=1` | Start/change auto-refresh interval |
-| `POST /tv/auto-refresh/stop` | Stop auto-refresh |
-| `POST /tv/update` | Manual incremental update |
-| `POST /tv/fetch-full` | Full database refresh |
-| `POST /tv/generate-playlist` | Regenerate M3U playlist |
-
 ---
 
 ## Usage
 
 ### Add to TvMate / IPTV Apps
 
-**For Movies:**
-```
-http://<SERVER_IP>:7070/cinemaos/playlist.m3u
-```
-
-**For TV Shows:**
-```
-http://<SERVER_IP>:7070/tv/playlist.m3u
-```
-
 **For Live TV with EPG:**
 ```
 Playlist: http://<SERVER_IP>:7070/tve/directv/playlist.m3u
 EPG URL:  http://<SERVER_IP>:7070/tve/directv/epg.xml
-```
-
-### VLC
-
-```bash
-vlc http://<SERVER_IP>:7070/cinemaos/playlist.m3u
 ```
 
 ### Direct Stream
@@ -392,24 +313,6 @@ http://<SERVER_IP>:7070/stream/espn
 | Service | Interval | Description |
 |---------|----------|-------------|
 | DirecTV EPG | 4 hours | Updates channel guide (830+ channels) |
-| CinemaOS Movies | 6 hours | Scans for new movies (incremental) |
-| Cineby TV Shows | 1 hour | Scans for new TV shows/episodes (incremental) |
-
----
-
-## Database Statistics
-
-### CinemaOS Movies
-- **23,148 unique movies** (deduplicated across categories)
-- **Categories**: popularMovie, latestMovie, topRatedMovie, upcomingMovie
-- **Genres**: Action, Comedy, Drama, Horror, Sci-Fi, Thriller, and more
-- **Full metadata**: Posters, backdrops, ratings, vote counts, release dates, overviews
-
-### Cineby TV Shows
-- **3,167 unique TV shows** (deduplicated across categories)
-- **Categories**: popular, top_rated, on_the_air, airing_today
-- **Genres**: Drama, Comedy, Sci-Fi & Fantasy, Crime, Animation, and more
-- **Full metadata**: Posters, backdrops, ratings, vote counts, first air dates, overviews
 
 ---
 
@@ -431,9 +334,6 @@ http://<SERVER_IP>:7070/stream/espn
 │  ├─────────────────────────────────────────────────────┤    │
 │  │  • DirecTV Live Streams                             │    │
 │  │  • EPG Service (auto-refresh every 4 hours)         │    │
-│  │  • CinemaOS Movies (auto-refresh every 6 hours)     │    │
-│  │  • Cineby TV Shows (auto-refresh every 1 hour)      │    │
-│  │  • VOD Providers (Cineby)                           │    │
 │  │  • HLS Proxy with header injection                  │    │
 │  └─────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
@@ -455,19 +355,9 @@ http://<SERVER_IP>:7070/stream/espn
 /app
 ├── stream-proxy.js          # Main server
 ├── directv-epg.js           # EPG service with auto-refresh
-├── cinemaos-db-manager.js   # Movie database with auto-refresh
-├── cineby-tv-manager.js     # TV show database with auto-refresh
 ├── tuner-manager.js         # DirecTV tuner management
 ├── channels.js              # Channel definitions
-├── providers/
-│   ├── base-provider.js     # Base provider class
-│   ├── cinemaos/            # CinemaOS provider (direct API)
-│   └── cineby/              # Cineby provider
 └── data/
-    ├── cinemaos-movies-db.json  # Movie database (23K+ movies)
-    ├── cinemaos-movies.m3u      # Movie M3U playlist
-    ├── cineby-tv-db.json        # TV show database (3K+ shows)
-    ├── cineby-tv.m3u            # TV show M3U playlist
     └── epg-cache.json           # EPG cache
 ```
 
@@ -527,11 +417,6 @@ Edit `app/channels.js` to add/modify channels:
 ### High latency
 - Reduce VLC network caching to 500ms
 - Current FFmpeg settings use 1-second HLS segments (already optimized)
-
-### CinemaOS movies not loading
-- Check `/cinemaos/stats` for database status
-- Verify auto-refresh is running: `/cinemaos/auto-refresh/status`
-- Manual update: `POST /cinemaos/update`
 
 ---
 
