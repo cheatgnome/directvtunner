@@ -94,10 +94,16 @@ app.get("/api/status", async (req, res) => {
       if (tuner && tuner.page) {
         const url = tuner.page.url();
         loginStatus.currentUrl = url;
-        loginStatus.isLoggedIn = url.includes("stream.directv.com") && !url.includes("login") && !url.includes("signin") && !url.includes("auth");
-        loginStatus.needsLogin = url.includes("login") || url.includes("signin") || url.includes("auth");
+
+        // about:blank means tuner is idle (paused to save bandwidth) but still logged in
+        const isIdle = url === 'about:blank';
+        loginStatus.isLoggedIn = isIdle || (url.includes("stream.directv.com") && !url.includes("login") && !url.includes("signin") && !url.includes("auth"));
+        loginStatus.needsLogin = !isIdle && (url.includes("login") || url.includes("signin") || url.includes("auth"));
+
         if (loginStatus.needsLogin) {
           loginStatus.message = "Please log in via noVNC";
+        } else if (isIdle) {
+          loginStatus.message = "Tuner idle (paused)";
         } else if (loginStatus.isLoggedIn) {
           loginStatus.message = "Logged in to DirecTV";
         } else {
@@ -142,8 +148,10 @@ app.get("/api/status", async (req, res) => {
         const tuner = tunerManager.getTuner(t.id);
         if (tuner && tuner.page) {
           const url = tuner.page.url();
-          tunerLoginStatus.isLoggedIn = url.includes("stream.directv.com") && !url.includes("login") && !url.includes("signin") && !url.includes("auth");
-          tunerLoginStatus.needsLogin = url.includes("login") || url.includes("signin") || url.includes("auth");
+          const isIdle = url === 'about:blank';
+          tunerLoginStatus.isLoggedIn = isIdle || (url.includes("stream.directv.com") && !url.includes("login") && !url.includes("signin") && !url.includes("auth"));
+          tunerLoginStatus.needsLogin = !isIdle && (url.includes("login") || url.includes("signin") || url.includes("auth"));
+          tunerLoginStatus.isIdle = isIdle;
         }
       } catch (e) { }
 
@@ -1252,10 +1260,13 @@ async function startLoginWatcher() {
       const tuner = tunerManager.getTuner(0);
       if (tuner && tuner.page) {
         const url = tuner.page.url();
-        const isLoggedIn = url.includes("stream.directv.com") &&
+
+        // about:blank means tuner is idle (paused) but still logged in
+        const isIdle = url === 'about:blank';
+        const isLoggedIn = isIdle || (url.includes("stream.directv.com") &&
           !url.includes("login") &&
           !url.includes("signin") &&
-          !url.includes("auth");
+          !url.includes("auth"));
 
         if (isLoggedIn && !loginDetected) {
           loginDetected = true;

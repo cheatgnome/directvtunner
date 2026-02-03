@@ -38,9 +38,10 @@ class TunerManager {
   startIdleCleanup() {
     setInterval(async () => {
       for (const tuner of this.tuners) {
-        // Release idle streaming tuners
+        // Release idle streaming tuners - pause video first to save bandwidth
         if (tuner.state === TunerState.STREAMING && tuner.isIdle()) {
-          console.log(`[tuner-manager] Tuner ${tuner.id} is idle, releasing...`);
+          console.log(`[tuner-manager] Tuner ${tuner.id} is idle, pausing and releasing...`);
+          await tuner.pauseVideo();  // Pause video to save bandwidth
           this.releaseTuner(tuner.id);
         }
 
@@ -63,7 +64,7 @@ class TunerManager {
           }
         }
       }
-    }, 30000);  // Check every 30 seconds
+    }, 2000);  // Check every 2 seconds for quick idle response
   }
 
   // Attempt to recover a tuner from error state

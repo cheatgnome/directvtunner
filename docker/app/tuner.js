@@ -80,6 +80,15 @@ class Tuner {
         await this.handleBlackScreen();
       });
 
+      // Pause any auto-playing video on startup to save bandwidth
+      // Delay slightly to allow page to load video element
+      setTimeout(async () => {
+        for (let i = 0; i < 3; i++) {
+          await this.pauseVideo();
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      }, 5000);
+
       this.state = TunerState.FREE;
       console.log(`[tuner-${this.id}] Ready (free)`);
     } catch (err) {
@@ -1144,8 +1153,41 @@ class Tuner {
     console.log(`[tuner-${this.id}] Client removed (total: ${this.clients})`);
   }
 
+  // Pause video playback in the browser to save bandwidth
+  // Navigates to blank page to fully stop video and network activity
+  async pauseVideo() {
+    if (!this.page) return;
+
+    try {
+      // First try to pause and clear source
+      await this.page.evaluate(() => {
+        const video = document.querySelector('video');
+        if (video) {
+          video.pause();
+          video.src = '';
+          video.load();  // Force reload empty source
+        }
+      });
+
+      // Navigate to blank page to fully stop all video activity
+      await this.page.goto('about:blank', { timeout: 5000 });
+      console.log(`[tuner-${this.id}] Video stopped (navigated to blank)`);
+    } catch (e) {
+      console.log(`[tuner-${this.id}] Failed to pause video: ${e.message}`);
+    }
+  }
+
   isIdle() {
-    return this.clients === 0 && (Date.now() - this.lastActivity) > config.idleTimeout;
+    // Activity-based idle detection: if no segment requests in 5 seconds, consider idle
+    // This works for HLS where clients can't be reliably tracked
+    const quickIdleTimeout = 5000;
+    const timeSinceActivity = Date.now() - this.lastActivity;
+    const isIdle = timeSinceActivity > quickIdleTimeout;
+
+    if (isIdle && this.state === 'streaming') {
+      console.log(`[tuner-${this.id}] Idle detected: ${timeSinceActivity}ms since last activity`);
+    }
+    return isIdle;
   }
 
   getStatus() {
