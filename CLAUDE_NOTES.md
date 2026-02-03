@@ -87,7 +87,3 @@ RUN apt-get install -y \
 - Supervisor logs in container: `/var/log/supervisor/`
 - Restart DVR service: `pkill -f "node stream-proxy.js"` (supervisor auto-restarts)
 
-## Cineby Integration
-Also includes Cineby movie streaming with native HLS playback (pause/rewind support):
-- `/cineby/movies` - List movies
-- `/cineby/:movieId/stream` - Stream movie (redirects to HLS URL)
