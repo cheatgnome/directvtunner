@@ -1,0 +1,129 @@
+# Intel Arc GPU-accelerated DirecTV Tuner
+# Uses VA-API for hardware-accelerated H.264 encoding on Intel Arc GPUs
+# Based on Ubuntu 24.04 which includes Intel Arc-compatible drivers
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV DISPLAY=:1
+ENV VNC_PORT=5901
+ENV NOVNC_PORT=6080
+ENV CHROME_DEBUG_PORT=9222
+ENV DVR_PORT=7070
+
+# Hardware acceleration environment for Intel Arc VAAPI
+ENV LIBVA_DRIVER_NAME=iHD
+ENV DVR_HW_ACCEL=vaapi
+ENV DVR_IMAGE=sunnyside1/directvtuner:intel-arc
+
+# Install base packages
+RUN apt-get update && apt-get install -y \
+    wget \
+    curl \
+    gnupg2 \
+    ca-certificates \
+    xvfb \
+    x11vnc \
+    fluxbox \
+    supervisor \
+    net-tools \
+    procps \
+    git \
+    python3 \
+    python3-pip \
+    pulseaudio \
+    unclutter \
+    dbus-x11 \
+    xdg-utils \
+    libnss3 \
+    libxss1 \
+    libasound2t64 \
+    fonts-liberation \
+    libgbm1 \
+    libgtk-3-0t64 \
+    libx11-xcb1 \
+    libxcb-dri3-0 \
+    libdrm2 \
+    libxshmfence1 \
+    xz-utils \
+    libayatana-appindicator3-1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Intel Arc GPU drivers and VA-API support
+# Ubuntu 24.04 includes Intel Media Driver 24.x with Arc (DG2) support
+RUN apt-get update && apt-get install -y \
+    vainfo \
+    intel-media-va-driver \
+    libmfx1 \
+    libva-drm2 \
+    libva-x11-2 \
+    libva2 \
+    mesa-va-drivers \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install FFmpeg with VAAPI support
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    pciutils \
+    intel-gpu-tools \
+    && rm -rf /var/lib/apt/lists/* \
+    && ffmpeg -version
+
+# Install Node.js 20.x
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Google Chrome
+RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install noVNC
+RUN git clone https://github.com/novnc/noVNC.git /opt/novnc \
+    && git clone https://github.com/novnc/websockify.git /opt/novnc/utils/websockify \
+    && ln -s /opt/novnc/vnc.html /opt/novnc/index.html
+
+# Create app directory
+WORKDIR /app
+
+# Copy application files
+COPY app/ /app/
+
+# Install Node dependencies
+RUN npm install
+
+# Create Chrome profile directory
+RUN mkdir -p /data/chrome-profile
+
+# Create supervisor config
+RUN mkdir -p /var/log/supervisor
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Create startup scripts
+COPY start-xvfb.sh /usr/local/bin/start-xvfb.sh
+COPY start-chrome.sh /usr/local/bin/start-chrome.sh
+COPY start-vnc.sh /usr/local/bin/start-vnc.sh
+COPY start-novnc.sh /usr/local/bin/start-novnc.sh
+COPY start-dvr.sh /usr/local/bin/start-dvr.sh
+COPY start-pulseaudio.sh /usr/local/bin/start-pulseaudio.sh
+COPY start-unclutter.sh /usr/local/bin/start-unclutter.sh
+COPY sync-chrome-profiles.sh /usr/local/bin/sync-chrome-profiles.sh
+RUN chmod +x /usr/local/bin/*.sh
+
+# Configure PulseAudio for system-wide mode
+RUN mkdir -p /var/run/pulse && \
+    adduser root pulse-access 2>/dev/null || true
+
+# Expose ports
+# 5901 - VNC
+# 6080 - noVNC web interface
+# 9222 - Chrome remote debugging
+# 7070 - DVR proxy server
+EXPOSE 5901 6080 9222 7070
+
+# Volume for persistent Chrome profile and HLS streams
+VOLUME ["/data"]
+
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

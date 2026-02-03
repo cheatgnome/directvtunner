@@ -36,7 +36,8 @@ docker pull sunnyside1/directvtuner:intel-vaapi
 |-----|-------------|----------|
 | `latest` | CPU encoding (libx264) with multi-tuner support | Any x86_64 |
 | `nvidia-multi` | NVIDIA NVENC multi-tuner | NVIDIA GPU (GTX 600+) |
-| `intel-vaapi` | Intel VA-API multi-tuner | Intel CPU with iGPU |
+| `intel-vaapi` | Intel VA-API multi-tuner | Intel CPU with iGPU (older) |
+| `intel-arc` | Intel Arc GPU VA-API | Intel Arc A-series GPUs |
 
 ### Multi-Tuner Support
 
@@ -359,6 +360,71 @@ docker-compose -f docker-compose.intel-multi.yml up -d
 ```
 
 **Note:** `--privileged` flag is optional - only needed for `intel_gpu_top` GPU utilization monitoring in the web UI. VA-API encoding works without it.
+
+---
+
+## GPU Acceleration (Intel Arc)
+
+For **Intel Arc A-series GPUs** (A310, A380, A580, A750, A770), use the dedicated Arc image. This image uses Ubuntu 24.04 which includes the newer Intel Media Driver with Arc (DG2) support.
+
+> **Note:** The standard `intel-vaapi` image does NOT support Intel Arc GPUs. Arc GPUs require the `intel-arc` image.
+
+### Requirements
+
+1. **Intel Arc A-series GPU** (A310, A380, A580, A750, A770)
+2. **Linux kernel 6.2+** (Unraid 6.12+ works)
+3. Access to `/dev/dri` device
+
+### Docker Run with Intel Arc
+
+```bash
+# Single tuner
+docker run -d \
+  --name dvr-tuner-arc \
+  --device /dev/dri:/dev/dri \
+  -p 7070:7070 \
+  -p 6080:6080 \
+  -v ./dvr-data:/data \
+  -e TZ=America/New_York \
+  sunnyside1/directvtuner:intel-arc
+
+# Multi-tuner (3 tuners)
+docker run -d \
+  --name dvr-tuner-arc \
+  --device /dev/dri:/dev/dri \
+  -p 7070:7070 \
+  -p 6080:6080 \
+  -p 6081:6081 \
+  -p 6082:6082 \
+  -v ./dvr-data:/data \
+  -e TZ=America/New_York \
+  -e DVR_NUM_TUNERS=3 \
+  sunnyside1/directvtuner:intel-arc
+```
+
+### Docker Compose with Intel Arc
+
+Use the provided `docker-compose.intel-arc.yml`:
+
+```bash
+docker-compose -f docker-compose.intel-arc.yml up -d
+```
+
+### Verify Arc GPU Works
+
+```bash
+# Check VAAPI is working inside container
+docker exec -it dvr-tuner-arc vainfo
+
+# Should show H264 encoding support:
+# VAProfileH264High  : VAEntrypointEncSlice
+```
+
+### Unraid Users
+
+1. Make sure your Intel Arc GPU is passed through to Docker (Settings → Docker → Enable `--device /dev/dri`)
+2. Or add `--device /dev/dri:/dev/dri` to your container's Extra Parameters
+3. The Arc GPU should appear as `card0` and `renderD128` in `/dev/dri/`
 
 ---
 

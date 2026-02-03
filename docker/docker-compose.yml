@@ -3,20 +3,20 @@ services:
     container_name: DirecTV
     build:
       context: .
-      dockerfile: Dockerfile.intel
+      dockerfile: Dockerfile.intel-arc
     hostname: dvr-tuner-intel
     network_mode: bridge
     restart: unless-stopped
     shm_size: '2gb'
-    privileged: true  # Optional: only needed for intel_gpu_top GPU monitoring in web UI
+    privileged: true # Optional: only needed for intel_gpu_top GPU monitoring in web UI
     devices:
       - /dev/dri:/dev/dri
     ports:
-      - "7070:7070"   # DVR API
-      - "6080:6080"   # noVNC Tuner 0
-      - "6081:6081"   # noVNC Tuner 1
-      - "6082:6082"   # noVNC Tuner 2
-      - "6083:6083"   # noVNC Tuner 3
+      - "7070:7070" # DVR API
+      - "6080:6080" # noVNC Tuner 0
+      - "6081:6081" # noVNC Tuner 1
+      - "6082:6082" # noVNC Tuner 2
+      - "6083:6083" # noVNC Tuner 3
     volumes:
       - /mnt/user/appdata/directv/data:/data
     environment:
