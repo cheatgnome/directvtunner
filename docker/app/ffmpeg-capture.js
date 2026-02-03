@@ -55,7 +55,7 @@ class FFmpegCapture {
   // Helper method to wait for process to fully terminate
   async waitForProcessExit(timeout = 5000) {
     if (!this.process) return true;
-    
+
     return new Promise((resolve) => {
       const startTime = Date.now();
       const checkInterval = setInterval(() => {
@@ -151,8 +151,8 @@ class FFmpegCapture {
       // hwAccel comes from config (env var), not user settings
       const hwAccel = this.useHwAccel;
       const encoder = hwAccel === 'nvenc' ? 'h264_nvenc' :
-                      (hwAccel === 'qsv' ? 'h264_qsv' :
-                      (hwAccel === 'vaapi' ? 'h264_vaapi' : 'libx264'));
+        (hwAccel === 'qsv' ? 'h264_qsv' :
+          (hwAccel === 'vaapi' ? 'h264_vaapi' : 'libx264'));
 
       console.log(`[ffmpeg-${this.tunerId}] Using settings: ${width}x${height} @ ${videoBitrate} video, ${audioBitrate} audio`);
       console.log(`[ffmpeg-${this.tunerId}] Encoder: ${encoder} (hwAccel: ${hwAccel})${this.hwAccelFailed ? ' [HW accel failed, using software fallback]' : ''}`);
@@ -280,7 +280,7 @@ class FFmpegCapture {
         // Clean old segments
         const oldFiles = fs.readdirSync(this.hlsDir).filter(f => f.endsWith('.ts') || f.endsWith('.m3u8'));
         for (const f of oldFiles) {
-          try { fs.unlinkSync(path.join(this.hlsDir, f)); } catch (e) {}
+          try { fs.unlinkSync(path.join(this.hlsDir, f)); } catch (e) { }
         }
 
         outputArgs = [
@@ -332,7 +332,7 @@ class FFmpegCapture {
         '-b:a', audioBitrate,
         '-ar', '48000',
         '-ac', '2',
-        '-af', 'aresample=async=1:min_hard_comp=0.1:first_pts=0',
+        '-af', this.buildAudioFilter(config.audioDelayMs),
         '-vsync', vsyncMode,
         ...outputArgs,
       ];
@@ -402,15 +402,15 @@ class FFmpegCapture {
       }
       // Detect actual NVENC initialization failures
       if (msg.includes('Cannot load') || msg.includes('No NVENC capable') ||
-          msg.includes('nvenc') && (msg.includes('error') || msg.includes('Error') || msg.includes('failed'))) {
+        msg.includes('nvenc') && (msg.includes('error') || msg.includes('Error') || msg.includes('failed'))) {
         console.error(`[ffmpeg-${this.tunerId}] NVENC ERROR DETECTED: ${msg.trim()}`);
         this.nvencErrorDetected = true;
       }
       // Detect actual VAAPI initialization failures
       if (msg.includes('Failed to initialise VAAPI') || msg.includes('VAAPI connection') ||
-          msg.includes('vaapi') && (msg.includes('error') || msg.includes('Error') || msg.includes('failed')) ||
-          msg.includes('iHD_drv_video.so init failed') || msg.includes('Device creation failed') ||
-          msg.includes('DRM_IOCTL_I915_GEM_APERTURE failed')) {
+        msg.includes('vaapi') && (msg.includes('error') || msg.includes('Error') || msg.includes('failed')) ||
+        msg.includes('iHD_drv_video.so init failed') || msg.includes('Device creation failed') ||
+        msg.includes('DRM_IOCTL_I915_GEM_APERTURE failed')) {
         console.error(`[ffmpeg-${this.tunerId}] VAAPI ERROR DETECTED: ${msg.trim()}`);
         this.vaapiErrorDetected = true;
       }
@@ -592,7 +592,7 @@ class FFmpegCapture {
 
     if (this.process) {
       console.log(`[ffmpeg-${this.tunerId}] Stopping capture and waiting...`);
-      
+
       const proc = this.process;
       proc.kill('SIGTERM');
 
@@ -792,6 +792,20 @@ class FFmpegCapture {
     return `${seconds}s`;
   }
 
+  // Build audio filter chain with optional delay for A/V sync
+  buildAudioFilter(audioDelayMs) {
+    const baseFilter = 'aresample=async=1:min_hard_comp=0.1:first_pts=0';
+
+    if (audioDelayMs && audioDelayMs > 0) {
+      // adelay filter delays audio by specified milliseconds
+      // Format: adelay=DELAY_MS|DELAY_MS (for stereo, both channels)
+      console.log(`[ffmpeg-${this.tunerId}] Audio delay: ${audioDelayMs}ms`);
+      return `adelay=${audioDelayMs}|${audioDelayMs},${baseFilter}`;
+    }
+
+    return baseFilter;
+  }
+
   getPlaylistPath() {
     if (this.hlsMode) {
       return this.hlsPlaylist;
@@ -844,7 +858,7 @@ class FFmpegCapture {
     // Check every segment interval (segment time + 1 second buffer)
     const checkInterval = (this.hlsSegmentTime + 1) * 1000;
 
-    console.log(`[ffmpeg-${this.tunerId}] Starting segment size monitor (check every ${checkInterval/1000}s, min size: ${this.minSegmentSize} bytes)`);
+    console.log(`[ffmpeg-${this.tunerId}] Starting segment size monitor (check every ${checkInterval / 1000}s, min size: ${this.minSegmentSize} bytes)`);
 
     this.segmentMonitorInterval = setInterval(() => {
       this.checkSegmentSizes();

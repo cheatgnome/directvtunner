@@ -25,3 +25,4 @@ services:
       - DVR_NUM_TUNERS=4
       - DVR_PORT=7070
       - DVR_HW_ACCEL=vaapi
+      - DVR_AUDIO_DELAY_MS=1500

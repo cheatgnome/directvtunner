@@ -71,6 +71,11 @@ module.exports = {
     preset: process.env.DVR_QSV_PRESET || 'fast',
   },
 
+  // Audio/Video sync adjustment
+  // Positive value = delay audio (use when audio is ahead of video)
+  // Negative value = not supported, adjust video instead
+  audioDelayMs: parseInt(process.env.DVR_AUDIO_DELAY_MS) || 0,
+
   // Platform-specific FFmpeg settings
   ffmpeg: {
     // macOS: Use avfoundation for screen capture
