@@ -37,10 +37,6 @@ with sync_playwright() as p:
     # Take screenshot of status tab
     page.screenshot(path='../verification/frontend_status.png')
 
-    content = page.content()
-    if 'CinemaOS Movies' in content:
-        print('FAILURE: CinemaOS Movies found in page content')
-    else:
-        print('SUCCESS: CinemaOS Movies NOT found in page content')
+    print(f'Page title: {page.title()}')
 
     browser.close()

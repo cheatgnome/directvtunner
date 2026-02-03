@@ -769,7 +769,7 @@ class Tuner {
     try {
       // Find and click the search input box
       const searchBoxFound = await this.page.evaluate(() => {
-        const searchInput = document.querySelector('input[placeholder*="TV Shows"], input[placeholder*="Keywords"], input[enterkeyhint="search"]');
+        const searchInput = document.querySelector('input[placeholder*="Search"], input[placeholder*="Keywords"], input[enterkeyhint="search"], input[type="search"]');
         if (searchInput) {
           searchInput.click();
           searchInput.focus();
