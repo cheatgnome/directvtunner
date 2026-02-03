@@ -72,14 +72,6 @@ function settingsApp() {
         active: 0,
         list: []
       },
-      cinemaos: {
-        available: false,
-        movieCount: 0
-      },
-      tv: {
-        available: false,
-        showCount: 0
-      },
       automations: {
         loginWatcher: false,
         autoEpgRefresh: false
@@ -390,17 +382,6 @@ function settingsApp() {
             list: tunerList
           };
 
-          // Update CinemaOS status
-          this.systemStatus.cinemaos = {
-            available: data.cinemaos?.enabled || false,
-            movieCount: data.cinemaos?.movieCount || 0
-          };
-
-          // Update TV status
-          this.systemStatus.tv = {
-            available: data.tv?.enabled || false,
-            showCount: data.tv?.showCount || 0
-          };
 
           // Update automations status
           this.systemStatus.automations = {
