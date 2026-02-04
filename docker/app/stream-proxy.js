@@ -866,7 +866,7 @@ app.post('/api/tuner/:tunerId/clear-cache', async (req, res) => {
     }
     console.log(`[server] Cleared Chrome cache for tuner ${tunerId}`);
 
-    // 3. Restart Chrome for this tuner
+    // 3. Restart Chrome for this tuner - start with about:blank to avoid video playback
     const chromeArgs = [
       `--remote-debugging-port=${debugPort}`,
       '--remote-debugging-address=0.0.0.0',
@@ -884,7 +884,7 @@ app.post('/api/tuner/:tunerId/clear-cache', async (req, res) => {
       '--disable-dev-shm-usage',
       '--no-sandbox',
       '--alsa-output-device=pulse',
-      'https://stream.directv.com'
+      'about:blank'  // Start with blank page to avoid video playback
     ];
 
     const chrome = spawn('/usr/bin/google-chrome-stable', chromeArgs, {
@@ -1027,7 +1027,7 @@ async function syncChromeProfiles() {
       '--disable-dev-shm-usage',
       '--no-sandbox',
       '--alsa-output-device=pulse',
-      'https://stream.directv.com'
+      'about:blank'  // Start with blank page to avoid video playback
     ];
 
     const chrome = spawn('/usr/bin/google-chrome-stable', chromeArgs, {

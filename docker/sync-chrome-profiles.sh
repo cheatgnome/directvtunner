@@ -142,6 +142,7 @@ if [ "$RESTART_CHROME" = true ]; then
 
         echo "Starting Chrome for tuner $i on display :${DISPLAY_NUM}..."
 
+        # Start with about:blank to avoid video playback
         DISPLAY=:${DISPLAY_NUM} \
         PULSE_SERVER=unix:/run/pulse/native \
         PULSE_SINK=${AUDIO_SINK} \
@@ -150,7 +151,7 @@ if [ "$RESTART_CHROME" = true ]; then
             --remote-debugging-address=0.0.0.0 \
             --user-data-dir=${PROFILE_DIR} \
             "${CHROME_FLAGS[@]}" \
-            "https://stream.directv.com" &
+            "about:blank" &
     done
 
     echo ""

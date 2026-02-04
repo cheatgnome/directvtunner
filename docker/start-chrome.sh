@@ -74,6 +74,7 @@ for i in $(seq 0 $((NUM_TUNERS - 1))); do
     echo "Starting Chrome instance $i on display :${DISPLAY_NUM}, port ${DEBUG_PORT}, audio sink ${AUDIO_SINK}"
 
     # Each Chrome instance gets its own PULSE_SINK for isolated audio
+    # Start with about:blank to avoid video playback until a stream is requested
     DISPLAY=:${DISPLAY_NUM} \
     PULSE_SERVER=unix:/run/pulse/native \
     PULSE_SINK=${AUDIO_SINK} \
@@ -82,7 +83,7 @@ for i in $(seq 0 $((NUM_TUNERS - 1))); do
         --remote-debugging-address=0.0.0.0 \
         --user-data-dir=${PROFILE_DIR} \
         "${CHROME_FLAGS[@]}" \
-        "https://stream.directv.com" &
+        "about:blank" &
 done
 
 echo "All $NUM_TUNERS Chrome instance(s) started"
