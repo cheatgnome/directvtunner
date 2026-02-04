@@ -174,28 +174,35 @@ class TunerManager {
 
     // Find a free tuner - prefer tuners that have access to this channel
     // (for multi-account setups where different accounts have different channels)
+    // Always prefer lower-numbered tuners (0, 1, 2, 3) for consistent ordering
     const allowedTuners = directvEpg.getTunersForChannel(channelId);
-    const preferredTunerId = directvEpg.getTunerForChannel(channelId);
     const hasChannelRestriction = allowedTuners.length > 0;
+
+    // Sort allowed tuners by ID to ensure we use the lowest numbered one first
+    allowedTuners.sort((a, b) => a - b);
 
     let freeTuner = null;
 
     if (hasChannelRestriction) {
       // Multi-account: ONLY use tuners that have access to this channel
-      freeTuner = this.tuners.find(t =>
-        t.state === TunerState.FREE && t.id === preferredTunerId
-      );
-      if (!freeTuner) {
-        freeTuner = this.tuners.find(t =>
-          t.state === TunerState.FREE && allowedTuners.includes(t.id)
-        );
+      // Find the first free tuner from the sorted allowed list (lowest ID first)
+      for (const tunerId of allowedTuners) {
+        const tuner = this.tuners.find(t => t.id === tunerId);
+        if (tuner && tuner.state === TunerState.FREE) {
+          freeTuner = tuner;
+          break;
+        }
       }
       if (freeTuner) {
         console.log(`[tuner-manager] Using tuner ${freeTuner.id} (has access to channel ${channelId})`);
       }
     } else {
       // No EPG mapping (single-account or EPG not scanned yet) - use any free tuner
-      freeTuner = this.tuners.find(t => t.state === TunerState.FREE);
+      // Sort by ID to prefer lower-numbered tuners
+      const freeTuners = this.tuners
+        .filter(t => t.state === TunerState.FREE)
+        .sort((a, b) => a.id - b.id);
+      freeTuner = freeTuners[0];
     }
 
     if (freeTuner) {
@@ -207,16 +214,27 @@ class TunerManager {
 
     // No free tuners - check for idle tuners we can steal
     // ONLY use idle tuners that have access to the channel (if restrictions exist)
+    // Prefer: 1) lower tuner ID, 2) oldest activity time
     let idleTuner = null;
     const idleTuners = this.tuners
       .filter(t => t.state === TunerState.STREAMING && t.clients === 0)
-      .sort((a, b) => a.lastActivity - b.lastActivity);
+      .sort((a, b) => {
+        // First by tuner ID (lower first)
+        if (a.id !== b.id) return a.id - b.id;
+        // Then by last activity (older first)
+        return a.lastActivity - b.lastActivity;
+      });
 
     if (hasChannelRestriction) {
-      // Only steal idle tuners that have access
-      idleTuner = idleTuners.find(t => allowedTuners.includes(t.id));
+      // Only steal idle tuners that have access, in order
+      for (const tuner of idleTuners) {
+        if (allowedTuners.includes(tuner.id)) {
+          idleTuner = tuner;
+          break;
+        }
+      }
     } else {
-      // No restrictions - use any idle tuner
+      // No restrictions - use the first idle tuner (already sorted by ID)
       idleTuner = idleTuners[0];
     }
 
@@ -230,7 +248,11 @@ class TunerManager {
     // AUTO-SWITCH: Only for single-tuner or when no channel restrictions
     // For multi-account, don't steal busy tuners that don't have access
     if (!hasChannelRestriction) {
-      const busyTuner = this.tuners.find(t => t.state === TunerState.STREAMING);
+      // Prefer lower-numbered tuners
+      const busyTuners = this.tuners
+        .filter(t => t.state === TunerState.STREAMING)
+        .sort((a, b) => a.id - b.id);
+      const busyTuner = busyTuners[0];
       if (busyTuner) {
         console.log(`[tuner-manager] Auto-switching tuner ${busyTuner.id} from ${busyTuner.currentChannel} to ${channelId}`);
         busyTuner.clients = 0;
@@ -240,15 +262,16 @@ class TunerManager {
       }
     } else {
       // Multi-account: check if any allowed tuner is streaming but could be stolen
-      const allowedBusyTuner = this.tuners.find(t =>
-        t.state === TunerState.STREAMING && allowedTuners.includes(t.id)
-      );
-      if (allowedBusyTuner) {
-        console.log(`[tuner-manager] Auto-switching tuner ${allowedBusyTuner.id} (has access) from ${allowedBusyTuner.currentChannel} to ${channelId}`);
-        allowedBusyTuner.clients = 0;
-        await allowedBusyTuner.tuneToChannel(channelId);
-        allowedBusyTuner.addClient();
-        return allowedBusyTuner;
+      // Prefer lower-numbered tuners from the allowed set
+      for (const tunerId of allowedTuners) {
+        const tuner = this.tuners.find(t => t.id === tunerId);
+        if (tuner && tuner.state === TunerState.STREAMING) {
+          console.log(`[tuner-manager] Auto-switching tuner ${tuner.id} (has access) from ${tuner.currentChannel} to ${channelId}`);
+          tuner.clients = 0;
+          await tuner.tuneToChannel(channelId);
+          tuner.addClient();
+          return tuner;
+        }
       }
     }
 

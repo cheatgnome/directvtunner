@@ -42,6 +42,7 @@ class TunerManager {
   }
 
   // Find a tuner for the requested channel
+  // Prefer tuners in order: 0, 1, 2, 3 (lowest ID first)
   async allocateTuner(channelId) {
     // First, check if any tuner is already on this channel
     const existingTuner = this.tuners.find(
@@ -54,8 +55,11 @@ class TunerManager {
       return existingTuner;
     }
 
-    // Find a free tuner
-    const freeTuner = this.tuners.find(t => t.state === TunerState.FREE);
+    // Find a free tuner - prefer lower-numbered tuners
+    const freeTuners = this.tuners
+      .filter(t => t.state === TunerState.FREE)
+      .sort((a, b) => a.id - b.id);
+    const freeTuner = freeTuners[0];
 
     if (freeTuner) {
       console.log(`[tuner-manager] Allocating free tuner ${freeTuner.id} for ${channelId}`);
@@ -65,9 +69,15 @@ class TunerManager {
     }
 
     // No free tuners - check for idle tuners we can steal
+    // Prefer: 1) lower tuner ID, 2) oldest activity time
     const idleTuner = this.tuners
       .filter(t => t.state === TunerState.STREAMING && t.clients === 0)
-      .sort((a, b) => a.lastActivity - b.lastActivity)[0];
+      .sort((a, b) => {
+        // First by tuner ID (lower first)
+        if (a.id !== b.id) return a.id - b.id;
+        // Then by last activity (older first)
+        return a.lastActivity - b.lastActivity;
+      })[0];
 
     if (idleTuner) {
       console.log(`[tuner-manager] Stealing idle tuner ${idleTuner.id} for ${channelId}`);

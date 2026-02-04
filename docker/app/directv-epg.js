@@ -5,7 +5,9 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 
-const DATA_DIR = path.join(__dirname, 'data');
+// Use /data for persistent storage (mounted volume) so data survives container updates
+// Falls back to __dirname/data for local development
+const DATA_DIR = fs.existsSync('/data') ? '/data' : path.join(__dirname, 'data');
 const CHANNELS_CACHE = path.join(DATA_DIR, 'directv_channels.json');
 const EPG_CACHE = path.join(DATA_DIR, 'directv_epg.json');
 const OVERRIDES_FILE = path.join(DATA_DIR, 'channel-overrides.json');
