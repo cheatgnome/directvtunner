@@ -19,11 +19,33 @@ const DEFAULT_CLIENT_CONTEXT = 'dmaID:501_0,billingDmaID:501,regionID:OV MSG SPO
 // Auto-refresh interval (4 hours)
 const settingsManager = require('./settings-manager');
 
+// Delay interval when tuner is in use (15 minutes)
+const TUNER_BUSY_DELAY = 15 * 60 * 1000;
+
 // Get refresh interval from settings (in hours), default 4
 function getRefreshInterval() {
   const settings = settingsManager.getSettings();
   const hours = settings.epg?.refreshInterval || 4;
   return hours * 60 * 60 * 1000;
+}
+
+// Check if any tuner is actively being used (streaming with clients)
+function isTunerInUse() {
+  try {
+    // Late require to avoid circular dependency issues
+    const tunerManager = require('./tuner-manager');
+    const status = tunerManager.getStatus();
+
+    for (const tuner of status.tuners) {
+      if (tuner.state === 'streaming' && tuner.clients > 0) {
+        return true;
+      }
+    }
+    return false;
+  } catch (err) {
+    console.error('[epg] Error checking tuner status:', err.message);
+    return false; // Proceed with refresh if we can't check
+  }
 }
 
 class DirectvEpg {
@@ -78,7 +100,13 @@ class DirectvEpg {
       await this.fetchFromBrowser();
       console.log('[epg] Auto-refresh completed successfully');
     } catch (err) {
-      console.error('[epg] Auto-refresh failed:', err.message);
+      if (err.tunerInUse) {
+        // Tuner is in use, schedule a delayed retry
+        console.log('[epg] Tuner is in use, delaying EPG refresh by 15 minutes...');
+        setTimeout(() => this.autoRefresh(), TUNER_BUSY_DELAY);
+      } else {
+        console.error('[epg] Auto-refresh failed:', err.message);
+      }
     }
   }
 
@@ -177,10 +205,19 @@ class DirectvEpg {
 
   // Fetch channels and EPG via browser CDP (uses authenticated session)
   // Scans ALL tuners to support multi-account setups
-  async fetchFromBrowser() {
+  // Options: { skipTunerCheck: boolean } - if true, bypass the tuner-in-use check
+  async fetchFromBrowser(options = {}) {
     if (this.isRefreshing) {
       console.log('[epg] Refresh already in progress, skipping');
       return { channels: this.channels.length, schedules: Object.keys(this.schedules).length };
+    }
+
+    // Check if any tuner is actively being used (unless bypassed)
+    if (!options.skipTunerCheck && isTunerInUse()) {
+      console.log('[epg] Tuner is in use, EPG refresh blocked');
+      const error = new Error('TUNER_IN_USE');
+      error.tunerInUse = true;
+      throw error;
     }
 
     this.isRefreshing = true;

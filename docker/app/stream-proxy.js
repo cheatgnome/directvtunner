@@ -1266,6 +1266,16 @@ app.post('/tve/directv/epg/refresh', async (req, res) => {
       ...result
     });
   } catch (error) {
+    // Handle tuner in use - return a specific error so the UI can show a helpful message
+    if (error.tunerInUse) {
+      console.log('[epg] Manual refresh blocked - tuner is in use');
+      return res.status(503).json({
+        success: false,
+        error: 'Tuner is currently in use. EPG refresh will automatically retry in 15 minutes when the tuner is free.',
+        tunerInUse: true
+      });
+    }
+
     console.error('[epg] Refresh error:', error.message);
     res.status(500).json({
       success: false,
@@ -1331,7 +1341,11 @@ async function startLoginWatcher() {
               await directvEpg.fetchFromBrowser();
               console.log("[login-watcher] EPG refresh completed");
             } catch (e) {
-              console.error("[login-watcher] EPG refresh failed:", e.message);
+              if (e.tunerInUse) {
+                console.log("[login-watcher] Tuner in use, EPG refresh will happen via auto-refresh");
+              } else {
+                console.error("[login-watcher] EPG refresh failed:", e.message);
+              }
             }
           } else {
             console.log("[login-watcher] EPG already has " + epgStatus.channelCount + " channels");
