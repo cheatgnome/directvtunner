@@ -225,14 +225,50 @@ class DirectvEpg {
         console.log('[epg] Could not apply streaming filter:', e.message);
       }
 
-      // Wait for data to load
+      // Wait for initial data to load
       await page.waitForTimeout(8000);
 
-      // Scroll to trigger more schedule loads
-      for (let i = 0; i < 3; i++) {
-        await page.keyboard.press('PageDown');
-        await page.waitForTimeout(2000);
+      // Scroll horizontally through time to load more schedule data (24 hours)
+      // The guide typically loads ~2-3 hours at a time, so we scroll forward multiple times
+      // Each scroll triggers new schedule API calls for the next time period
+      console.log('[epg] Scrolling through guide to load 24 hours of data...');
+
+      // Method 1: Try clicking forward arrow button if it exists
+      try {
+        const forwardButton = await page.$('[aria-label="Forward"], [aria-label="Next"], button[class*="forward"], button[class*="next"], [data-testid="guide-forward"]');
+        if (forwardButton) {
+          // Click forward button 16 times (covers ~48 hours at ~3h per view, ensuring 24h coverage)
+          for (let i = 0; i < 16; i++) {
+            await forwardButton.click();
+            await page.waitForTimeout(2500); // Wait for API response
+          }
+          console.log('[epg] Scrolled forward using forward button');
+        } else {
+          // Method 2: Use keyboard navigation
+          // Focus on the guide grid first
+          await page.click('[class*="guide"], [class*="grid"], [class*="schedule"]').catch(() => { });
+          await page.waitForTimeout(500);
+
+          // Press Right arrow key 48 times (roughly 48 hours if each press = 1 hour slot)
+          // This ensures we get at least 24 hours of EPG data
+          for (let i = 0; i < 24; i++) {
+            await page.keyboard.press('ArrowRight');
+            await page.waitForTimeout(300);
+            await page.keyboard.press('ArrowRight');
+            await page.waitForTimeout(300);
+            // Wait after every couple of key presses to let API calls complete
+            if (i % 3 === 2) {
+              await page.waitForTimeout(2000);
+            }
+          }
+          console.log('[epg] Scrolled forward using arrow keys');
+        }
+      } catch (scrollErr) {
+        console.log('[epg] Scroll error (continuing anyway):', scrollErr.message);
       }
+
+      // Wait for final API calls to complete
+      await page.waitForTimeout(3000);
 
       // Close the page we created
       await page.close();
