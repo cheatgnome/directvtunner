@@ -1,16 +1,24 @@
 services:
-  dvr-tuner-intel:
+  dvr-tuner-nvidia:
     container_name: DirecTV
     build:
       context: .
-      dockerfile: Dockerfile.intel-arc
-    hostname: dvr-tuner-intel
+      dockerfile: Dockerfile.nvidia
+    hostname: dvr-tuner-nvidia
     network_mode: bridge
     restart: unless-stopped
     shm_size: '2gb'
-    privileged: true # Optional: only needed for intel_gpu_top GPU monitoring in web UI
-    devices:
-      - /dev/dri:/dev/dri
+    runtime: nvidia
+    environment:
+      - TZ=America/New_York
+      - DISPLAY=:1
+      - DVR_NUM_TUNERS=4
+      - DVR_PORT=7070
+      - DVR_HW_ACCEL=nvenc
+      - DVR_AUDIO_DELAY_MS=1500
+      - DVR_PROFILE_SYNC_DISABLED=true # Disable auto-sync
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=video,compute,utility
     ports:
       - "7070:7070" # DVR API
       - "6080:6080" # noVNC Tuner 0
@@ -19,11 +27,3 @@ services:
       - "6083:6083" # noVNC Tuner 3
     volumes:
       - /mnt/user/appdata/directv/data:/data
-    environment:
-      - TZ=America/New_York
-      - DISPLAY=:1
-      - DVR_NUM_TUNERS=4
-      - DVR_PORT=7070
-      - DVR_HW_ACCEL=vaapi
-      - DVR_AUDIO_DELAY_MS=1500
-      - DVR_PROFILE_SYNC_DISABLED=true # Disable auto-sync
