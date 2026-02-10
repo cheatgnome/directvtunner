@@ -6,6 +6,7 @@ const config = require('./config');
 const FFmpegCapture = require('./ffmpeg-capture');
 const { getChannel, getChannelUrl } = require('./channels');
 const directvEpg = require('./directv-epg');
+const settingsManager = require('./settings-manager');
 
 // Tuner states
 const TunerState = {
@@ -1180,7 +1181,7 @@ class Tuner {
   isIdle() {
     // Activity-based idle detection: if no segment requests in 5 seconds, consider idle
     // This works for HLS where clients can't be reliably tracked
-    const quickIdleTimeout = 15000;
+    const quickIdleTimeout = settingsManager.getSettings().hls.idleTimeout || 15000;
     const timeSinceActivity = Date.now() - this.lastActivity;
     const isIdle = timeSinceActivity > quickIdleTimeout;
 

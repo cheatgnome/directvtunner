@@ -10,7 +10,8 @@ function settingsApp() {
       },
       hls: {
         segmentTime: 4,
-        listSize: 5
+        listSize: 5,
+        idleTimeout: 15000
       },
       epg: {
         refreshInterval: 4

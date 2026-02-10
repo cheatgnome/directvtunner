@@ -17,7 +17,8 @@ const DEFAULTS = {
   },
   hls: {
     segmentTime: 4,
-    listSize: 5
+    listSize: 5,
+    idleTimeout: 15000 // 15s default
   },
   epg: {
     refreshInterval: 4
@@ -76,7 +77,8 @@ function saveSettings(newSettings) {
     },
     hls: {
       segmentTime: parseInt(newSettings.hls?.segmentTime) || DEFAULTS.hls.segmentTime,
-      listSize: parseInt(newSettings.hls?.listSize) || DEFAULTS.hls.listSize
+      listSize: parseInt(newSettings.hls?.listSize) || DEFAULTS.hls.listSize,
+      idleTimeout: parseInt(newSettings.hls?.idleTimeout) || DEFAULTS.hls.idleTimeout
     },
     epg: {
       refreshInterval: parseInt(newSettings.epg?.refreshInterval) || DEFAULTS.epg.refreshInterval
