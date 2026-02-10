@@ -309,12 +309,15 @@ class FFmpegCapture {
 
       // Hardware acceleration initialization args
       let hwInitArgs = [];
-      let vaapiFilter = [];
+      // Always reset video timestamps to 0 to match audio (fixes random sync issues)
+      let videoFilters = ['-vf', 'setpts=PTS-STARTPTS'];
+
       if (hwAccel === 'qsv') {
         hwInitArgs = ['-init_hw_device', 'qsv=qsv:hw', '-filter_hw_device', 'qsv'];
       } else if (hwAccel === 'vaapi') {
         hwInitArgs = ['-vaapi_device', '/dev/dri/renderD128'];
-        vaapiFilter = ['-vf', 'format=nv12,hwupload'];
+        // Combine with VAAPI upload
+        videoFilters = ['-vf', 'setpts=PTS-STARTPTS,format=nv12,hwupload'];
       }
 
       args = [
@@ -332,7 +335,7 @@ class FFmpegCapture {
         '-f', 'pulse',
         '-ac', '2',
         '-i', audioSink,
-        ...vaapiFilter,
+        ...videoFilters,
         ...videoEncoderArgs,
         '-c:a', 'aac',
         '-b:a', audioBitrate,
