@@ -184,7 +184,8 @@ class FFmpegCapture {
           '-bufsize', bufferSize,
           '-g', String(gopSize),
           '-bf', String(nvencBframes),
-          '-flags', '+cgop',
+          '-flags', '+cgop-loop',
+          '-sc_threshold', '0',
         ];
 
         // Add lookahead if configured (0 = disabled)
@@ -208,7 +209,8 @@ class FFmpegCapture {
           '-bufsize', bufferSize,
           '-g', String(gopSize),
           '-bf', '0',
-          '-flags', '+cgop',
+          '-flags', '+cgop-loop',
+          '-sc_threshold', '0',
         ];
       } else if (hwAccel === 'vaapi') {
         // Intel VAAPI hardware encoding (Linux)
@@ -223,6 +225,8 @@ class FFmpegCapture {
           '-bufsize', bufferSize,
           '-g', String(gopSize),
           '-bf', '0',
+          '-flags', '+cgop-loop',
+          '-sc_threshold', '0',
         ];
       } else {
         // Software encoding (libx264)
@@ -244,7 +248,8 @@ class FFmpegCapture {
             '-g', String(gopSize),
             '-bf', '0',
             '-refs', '1',
-            '-flags', '+cgop',
+            '-flags', '+cgop-loop',
+            '-sc_threshold', '0',
           ];
         } else {
           // Standard quality settings
@@ -263,9 +268,9 @@ class FFmpegCapture {
             '-keyint_min', String(Math.floor(gopSize / 2)),
             '-bf', '2',
             '-b_strategy', '1',
-            '-sc_threshold', '40',
+            '-sc_threshold', '0',
             '-refs', '3',
-            '-flags', '+cgop',
+            '-flags', '+cgop-loop',
           ];
         }
       }
@@ -287,7 +292,7 @@ class FFmpegCapture {
           '-f', 'hls',
           '-hls_time', String(this.hlsSegmentTime),
           '-hls_list_size', String(this.hlsListSize),
-          '-hls_flags', 'delete_segments+append_list',
+          '-hls_flags', 'delete_segments+append_list+split_by_time',
           '-hls_segment_filename', path.join(this.hlsDir, 'segment%03d.ts'),
           this.hlsPlaylist,
         ];
@@ -315,14 +320,15 @@ class FFmpegCapture {
       args = [
         ...hwInitArgs,
         '-fflags', '+genpts+igndts',
-        '-thread_queue_size', String(threadQueueSize),
+        '-thread_queue_size', '4096',
         '-probesize', probeSize,
         '-f', 'x11grab',
+        '-r', '30',
         '-framerate', '30',
         '-draw_mouse', drawMouse ? '1' : '0',
         '-video_size', `${width}x${height}`,
         '-i', `:${displayNum}`,
-        '-thread_queue_size', String(threadQueueSize),
+        '-thread_queue_size', '4096',
         '-f', 'pulse',
         '-ac', '2',
         '-i', audioSink,
@@ -334,6 +340,7 @@ class FFmpegCapture {
         '-ac', '2',
         '-af', this.buildAudioFilter(config.audioDelayMs),
         '-vsync', vsyncMode,
+        '-max_interleave_delta', '0',
         ...outputArgs,
       ];
     }
@@ -826,7 +833,9 @@ class FFmpegCapture {
     try {
       if (!fs.existsSync(this.hlsPlaylist)) return false;
       const content = fs.readFileSync(this.hlsPlaylist, 'utf8');
-      return content.includes('.ts');
+      // Wait for at least 3 segments to prevent buffer underrun
+      const segmentCount = (content.match(/\.ts/g) || []).length;
+      return segmentCount >= 3;
     } catch (e) {
       return false;
     }

@@ -32,7 +32,7 @@ class FFmpegCapture {
   // Helper method to wait for process to fully terminate
   async waitForProcessExit(timeout = 5000) {
     if (!this.process) return true;
-    
+
     return new Promise((resolve) => {
       const startTime = Date.now();
       const checkInterval = setInterval(() => {
@@ -104,47 +104,88 @@ class FFmpegCapture {
       const audioBitrate = config.audioBitrate || '128k';
       const width = config.resolution?.width || 1280;
       const height = config.resolution?.height || 720;
+      const encoder = config.getEncoder();
 
-      console.log(`[ffmpeg-${this.tunerId}] Using settings: ${width}x${height} @ ${videoBitrate} video, ${audioBitrate} audio`);
+      console.log(`[ffmpeg-${this.tunerId}] Using settings: ${width}x${height} @ ${videoBitrate} video, ${audioBitrate} audio, encoder: ${encoder}`);
 
       args = [
-        '-thread_queue_size', '1024',
+        '-thread_queue_size', '4096',
         '-f', 'x11grab',
+        '-r', '30',
         '-framerate', '30',
         '-video_size', `${width}x${height}`,
         '-i', `:${displayNum}`,
-        '-thread_queue_size', '1024',
+        '-thread_queue_size', '4096',
+        '-use_wallclock_as_timestamps', '1',
         '-f', 'pulse',
         '-ac', '2',
         '-i', 'virtual_speaker.monitor',
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-tune', 'zerolatency',
-        '-profile:v', 'high',
-        '-level', '4.1',
-        '-pix_fmt', 'yuv420p',
-        '-crf', '23',
+      ];
+
+      // Add hardware acceleration flags
+      if (encoder === 'h264_vaapi') {
+        args.push(
+          '-vaapi_device', '/dev/dri/renderD128',
+          '-vf', 'format=nv12,hwupload',
+          '-c:v', encoder,
+          '-qp', '24' // Constant quality for VAAPI
+        );
+      } else if (encoder === 'h264_nvenc') {
+        args.push(
+          '-c:v', encoder,
+          '-preset', config.nvenc.preset,
+          '-tune', config.nvenc.tune,
+          '-rc', config.nvenc.rc
+        );
+        if (config.nvenc.lookahead > 0) args.push('-rc-lookahead', config.nvenc.lookahead.toString());
+        if (config.nvenc.bframes > 0) args.push('-bf', config.nvenc.bframes.toString());
+      } else {
+        // Software fallback (libx264)
+        args.push(
+          '-c:v', 'libx264',
+          '-preset', 'veryfast',
+          '-tune', 'zerolatency',
+          '-profile:v', 'high',
+          '-level', '4.1',
+          '-pix_fmt', 'yuv420p',
+          '-crf', '23'
+        );
+      }
+
+      // Common encoding flags
+      args.push(
+        '-fflags', '+genpts',
         '-b:v', videoBitrate,
         '-maxrate', videoBitrate,
-        '-bufsize', '2M',
-        '-g', '60',
-        '-keyint_min', '30',
-        '-bf', '2',
-        '-b_strategy', '1',
-        '-sc_threshold', '40',
-        '-refs', '3',
-        '-flags', '+cgop',
+        '-bufsize', '4M', // Increased buffer slightly
+        '-g', '30', // 1 second GOP
+        '-keyint_min', '30'
+      );
+
+      // Add flags that might not be compatible with all HW encoders, or need specific handling
+      if (encoder === 'libx264') {
+        args.push(
+          '-bf', '2',
+          '-b_strategy', '1',
+          '-sc_threshold', '40',
+          '-refs', '3',
+          '-flags', '+cgop'
+        );
+      } else if (encoder === 'h264_vaapi') {
+        // VAAPI specific additions if needed, but the basics are covered above
+      }
+
+      // Audio and Output flags
+      args.push(
         '-c:a', 'aac',
         '-b:a', audioBitrate,
         '-ar', '48000',
         '-ac', '2',
-        '-async', '1',
+        '-af', 'aresample=async=1',
         '-vsync', 'cfr',
-        '-muxdelay', '0',
-        '-muxpreload', '0',
         '-f', 'mpegts',
-        'pipe:1',
-      ];
+        'pipe:1'
+      );
     }
 
     console.log(`[ffmpeg-${this.tunerId}] Starting MPEG-TS capture...`);
@@ -256,7 +297,7 @@ class FFmpegCapture {
 
     if (this.process) {
       console.log(`[ffmpeg-${this.tunerId}] Stopping capture and waiting...`);
-      
+
       const proc = this.process;
       proc.kill('SIGTERM');
 

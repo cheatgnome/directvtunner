@@ -45,11 +45,11 @@ module.exports = {
   // HLS settings (better for multiple clients watching same channel)
   hlsMode: process.env.DVR_HLS_MODE !== 'false', // Default true, set DVR_HLS_MODE=false to use MPEG-TS pipe
   hls: {
-    segmentTime: parseInt(process.env.DVR_HLS_SEGMENT_TIME) || 4,  // Seconds per segment (4s = less HTTP overhead)
-    listSize: parseInt(process.env.DVR_HLS_LIST_SIZE) || 6,        // Segments in playlist (24s buffer)
+    segmentTime: parseInt(process.env.DVR_HLS_SEGMENT_TIME) || 2,  // Seconds per segment (2s = better stability)
+    listSize: parseInt(process.env.DVR_HLS_LIST_SIZE) || 10,       // Segments in playlist (20s buffer)
   },
-  hlsSegmentTime: 4,  // Legacy
-  hlsListSize: 6,     // Legacy
+  hlsSegmentTime: 2,  // Legacy
+  hlsListSize: 10,     // Legacy
 
   // Hardware acceleration settings
   // DVR_HW_ACCEL: 'none' | 'nvenc' | 'vaapi' | 'qsv' (auto-detected from env)

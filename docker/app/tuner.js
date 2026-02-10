@@ -1180,7 +1180,7 @@ class Tuner {
   isIdle() {
     // Activity-based idle detection: if no segment requests in 5 seconds, consider idle
     // This works for HLS where clients can't be reliably tracked
-    const quickIdleTimeout = 5000;
+    const quickIdleTimeout = 15000;
     const timeSinceActivity = Date.now() - this.lastActivity;
     const isIdle = timeSinceActivity > quickIdleTimeout;
 

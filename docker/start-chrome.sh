@@ -24,13 +24,13 @@ CHROME_FLAGS=(
     "--disable-background-networking"
     "--disable-sync"
     "--disable-translate"
-    "--disable-gpu"
     "--window-position=0,0"
     "--kiosk"
     "--autoplay-policy=no-user-gesture-required"
     "--disable-dev-shm-usage"
     "--no-sandbox"
     "--alsa-output-device=pulse"
+    "--disable-gpu"
 )
 
 # Low resource mode: add memory optimization flags
