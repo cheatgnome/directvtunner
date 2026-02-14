@@ -299,7 +299,30 @@ app.post('/api/presets/:presetId', (req, res) => {
     const newSettings = {
       ...currentSettings,
       ...preset.settings,
-      // tuners preserved from currentSettings above
+      video: {
+        ...currentSettings.video,
+        ...preset.settings.video,
+      },
+      audio: {
+        ...currentSettings.audio,
+        ...preset.settings.audio,
+      },
+      hls: {
+        ...currentSettings.hls,
+        ...preset.settings.hls,
+      },
+      epg: {
+        ...currentSettings.epg,
+        ...preset.settings.epg,
+      },
+      tuners: {
+        ...currentSettings.tuners,
+        ...preset.settings.tuners,
+      },
+      encoding: {
+        ...currentSettings.encoding,
+        ...preset.settings.encoding,
+      },
     };
 
     // Save the preset settings

@@ -128,12 +128,29 @@ class DirectvEpg {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
       }
-      fs.writeFileSync(CHANNELS_CACHE, JSON.stringify({ channels: this.channels }, null, 2));
-      fs.writeFileSync(EPG_CACHE, JSON.stringify({ schedules: this.schedules, lastFetch: this.lastFetch }, null, 2));
+      fs.writeFileSync(CHANNELS_CACHE, JSON.stringify({ channels: this.channels }));
+      fs.writeFileSync(EPG_CACHE, JSON.stringify({ schedules: this.schedules, lastFetch: this.lastFetch }));
       console.log('[epg] Cache saved');
     } catch (err) {
       console.error('[epg] Error saving cache:', err.message);
     }
+  }
+
+  // Prune expired schedule entries (keep 4h buffer for catch-up)
+  pruneExpiredSchedules() {
+    const cutoff = Date.now() - (4 * 60 * 60 * 1000);
+    let pruned = 0;
+    for (const channelId of Object.keys(this.schedules)) {
+      const before = this.schedules[channelId].length;
+      this.schedules[channelId] = this.schedules[channelId].filter(
+        s => new Date(s.endTime).getTime() > cutoff
+      );
+      pruned += before - this.schedules[channelId].length;
+      if (this.schedules[channelId].length === 0) {
+        delete this.schedules[channelId];
+      }
+    }
+    if (pruned > 0) console.log(`[epg] Pruned ${pruned} expired schedule entries`);
   }
 
   // Fetch channels and EPG via browser CDP (uses authenticated session)
@@ -153,6 +170,10 @@ class DirectvEpg {
     }
 
     this.isRefreshing = true;
+
+    // Prune expired schedules before fetching new data to prevent unbounded growth
+    this.pruneExpiredSchedules();
+
     console.log('[epg] Fetching EPG data via browser...');
 
     const browser = await chromium.connectOverCDP('http://localhost:9222');

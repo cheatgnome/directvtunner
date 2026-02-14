@@ -5,6 +5,7 @@ const path = require('path');
 const SETTINGS_PATH = process.env.DVR_DATA_DIR
   ? path.join(process.env.DVR_DATA_DIR, 'settings.json')
   : '/data/settings.json';
+const AUDIO_DELAY_DEFAULT = Math.max(0, parseInt(process.env.DVR_AUDIO_DELAY_MS) || 0);
 
 // Default settings - matches current config.js values
 const DEFAULTS = {
@@ -13,7 +14,8 @@ const DEFAULTS = {
     bitrate: '2500k'
   },
   audio: {
-    bitrate: '128k'
+    bitrate: '128k',
+    delayMs: AUDIO_DELAY_DEFAULT
   },
   hls: {
     segmentTime: 4,
@@ -73,7 +75,8 @@ function saveSettings(newSettings) {
       bitrate: String(newSettings.video?.bitrate || DEFAULTS.video.bitrate)
     },
     audio: {
-      bitrate: String(newSettings.audio?.bitrate || DEFAULTS.audio.bitrate)
+      bitrate: String(newSettings.audio?.bitrate || DEFAULTS.audio.bitrate),
+      delayMs: Math.max(0, parseInt(newSettings.audio?.delayMs) || 0)
     },
     hls: {
       segmentTime: parseInt(newSettings.hls?.segmentTime) || DEFAULTS.hls.segmentTime,

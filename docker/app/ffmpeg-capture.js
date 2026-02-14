@@ -133,6 +133,7 @@ class FFmpegCapture {
       const settings = settingsManager.getSettings();
       const videoBitrate = settings.video?.bitrate || config.videoBitrate || '4M';
       const audioBitrate = settings.audio?.bitrate || config.audioBitrate || '128k';
+      const audioDelayMs = Math.max(0, parseInt(settings.audio?.delayMs) || 0);
       const width = settings.video?.resolution?.width || config.resolution?.width || 1280;
       const height = settings.video?.resolution?.height || config.resolution?.height || 720;
       // HLS settings from user config
@@ -154,7 +155,7 @@ class FFmpegCapture {
         (hwAccel === 'qsv' ? 'h264_qsv' :
           (hwAccel === 'vaapi' ? 'h264_vaapi' : 'libx264'));
 
-      console.log(`[ffmpeg-${this.tunerId}] Using settings: ${width}x${height} @ ${videoBitrate} video, ${audioBitrate} audio`);
+      console.log(`[ffmpeg-${this.tunerId}] Using settings: ${width}x${height} @ ${videoBitrate} video, ${audioBitrate} audio, ${audioDelayMs}ms delay`);
       console.log(`[ffmpeg-${this.tunerId}] Encoder: ${encoder} (hwAccel: ${hwAccel})${this.hwAccelFailed ? ' [HW accel failed, using software fallback]' : ''}`);
       console.log(`[ffmpeg-${this.tunerId}] Encoding: buffer=${bufferSize}, queue=${threadQueueSize}, vsync=${vsyncMode}, gop=${gopSize}`);
       this.stats.encoder = encoder;
@@ -341,7 +342,7 @@ class FFmpegCapture {
         '-b:a', audioBitrate,
         '-ar', '48000',
         '-ac', '2',
-        '-af', this.buildAudioFilter(config.audioDelayMs),
+        '-af', this.buildAudioFilter(audioDelayMs),
         '-vsync', vsyncMode,
         '-max_interleave_delta', '0',
         ...outputArgs,

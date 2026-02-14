@@ -15,7 +15,7 @@ services:
       - DISPLAY=:1
       - DVR_NUM_TUNERS=4
       - DVR_PORT=7070
-      - DVR_AUDIO_DELAY_MS=1500
+      - DVR_AUDIO_DELAY_MS=0
       - DVR_PROFILE_SYNC_DISABLED=true # Disable auto-sync
     ports:
       - "7070:7070" # DVR API

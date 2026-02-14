@@ -6,7 +6,8 @@ function settingsApp() {
         bitrate: '2500k'
       },
       audio: {
-        bitrate: '128k'
+        bitrate: '128k',
+        delayMs: 0
       },
       hls: {
         segmentTime: 4,
