@@ -423,12 +423,12 @@ class DirectvEpg {
         }
       }
 
-      // Build merged channel list sorted by channel number, then by name
+      // Build merged channel list sorted alphabetically by name, then by number
       this.channels = Array.from(allChannelsById.values())
         .sort((a, b) => {
-          const numDiff = parseInt(a.number) - parseInt(b.number);
-          if (numDiff !== 0) return numDiff;
-          return (a.name || '').localeCompare(b.name || '');
+          const nameCmp = (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+          if (nameCmp !== 0) return nameCmp;
+          return parseInt(a.number) - parseInt(b.number);
         });
 
       console.log(`[epg] Total: ${this.channels.length} unique channels from ${Object.keys(this.tunerChannels).length} tuner(s)`);
