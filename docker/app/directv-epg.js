@@ -1,5 +1,6 @@
 // DirecTV EPG Service
 // Fetches guide data from DirecTV API and generates XMLTV format
+// Schedules stored as per-channel files to avoid OOM on large datasets
 
 const fs = require('fs');
 const path = require('path');
@@ -9,8 +10,13 @@ const { chromium } = require('playwright');
 // Falls back to __dirname/data for local development
 const DATA_DIR = fs.existsSync('/data') ? '/data' : path.join(__dirname, 'data');
 const CHANNELS_CACHE = path.join(DATA_DIR, 'directv_channels.json');
-const EPG_CACHE = path.join(DATA_DIR, 'directv_epg.json');
+const EPG_DIR = path.join(DATA_DIR, 'epg');
+const EPG_META = path.join(EPG_DIR, 'meta.json');
+const SCHEDULES_DIR = path.join(EPG_DIR, 'schedules');
 const OVERRIDES_FILE = path.join(DATA_DIR, 'channel-overrides.json');
+
+// Legacy monolithic cache (for migration)
+const LEGACY_EPG_CACHE = path.join(DATA_DIR, 'directv_epg.json');
 
 // DirecTV API base
 const API_BASE = 'https://api.cld.dtvce.com';
@@ -50,18 +56,87 @@ function isTunerInUse() {
   }
 }
 
+// Sanitize channel ID for use as a filename (replace unsafe chars)
+function safeFilename(channelId) {
+  return String(channelId).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
 class DirectvEpg {
   constructor() {
     this.channels = [];           // Merged channel list (deduplicated)
     this.tunerChannels = {};      // Per-tuner channels: { tunerId: [...channels] }
     this.tunerMapping = {};       // Channel to tuner: { channelNumber: tunerId }
-    this.schedules = {};
+    this.schedules = {};          // Temporary in-memory buffer (used during fetch only)
     this.lastFetch = null;
     this.refreshTimer = null;
     this.isRefreshing = false;
     this.overrides = {};          // Channel overrides: { channelId: { hidden, customName, customGroup } }
+    this.ensureDirectories();
+    this.migrateFromLegacy();
     this.loadCache();
     this.loadOverrides();
+  }
+
+  // Ensure per-channel schedule directories exist
+  ensureDirectories() {
+    try {
+      if (!fs.existsSync(EPG_DIR)) fs.mkdirSync(EPG_DIR, { recursive: true });
+      if (!fs.existsSync(SCHEDULES_DIR)) fs.mkdirSync(SCHEDULES_DIR, { recursive: true });
+    } catch (err) {
+      console.error('[epg] Error creating directories:', err.message);
+    }
+  }
+
+  // Migrate from legacy monolithic directv_epg.json to per-channel files
+  migrateFromLegacy() {
+    try {
+      if (!fs.existsSync(LEGACY_EPG_CACHE)) return;
+
+      console.log('[epg] Migrating from legacy monolithic EPG cache...');
+
+      // Read the legacy file in a streaming fashion by reading raw text
+      // and processing it — but since we must migrate, we parse it once
+      const raw = fs.readFileSync(LEGACY_EPG_CACHE, 'utf8');
+
+      // Try to parse — if it fails, the file is corrupt, just delete it
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch (parseErr) {
+        console.error('[epg] Legacy cache corrupt, deleting:', parseErr.message);
+        fs.unlinkSync(LEGACY_EPG_CACHE);
+        return;
+      }
+
+      // Write meta
+      if (data.lastFetch) {
+        fs.writeFileSync(EPG_META, JSON.stringify({ lastFetch: data.lastFetch }));
+      }
+
+      // Write per-channel schedule files
+      if (data.schedules) {
+        let count = 0;
+        for (const [channelId, entries] of Object.entries(data.schedules)) {
+          if (entries && entries.length > 0) {
+            const filePath = path.join(SCHEDULES_DIR, `${safeFilename(channelId)}.json`);
+            fs.writeFileSync(filePath, JSON.stringify(entries));
+            count++;
+          }
+        }
+        console.log(`[epg] Migrated ${count} channel schedules to per-channel files`);
+      }
+
+      // Delete the legacy file
+      fs.unlinkSync(LEGACY_EPG_CACHE);
+      console.log('[epg] Legacy EPG cache deleted');
+
+      // Free the parsed data
+      data = null;
+
+    } catch (err) {
+      console.error('[epg] Migration error:', err.message);
+      // Don't block startup — just continue
+    }
   }
 
   // Start auto-refresh timer
@@ -112,6 +187,7 @@ class DirectvEpg {
     }
   }
 
+  // Load cache — only loads metadata and channels (schedules loaded on demand)
   loadCache() {
     try {
       if (fs.existsSync(CHANNELS_CACHE)) {
@@ -121,47 +197,99 @@ class DirectvEpg {
         this.tunerMapping = data.tunerMapping || {};
         console.log(`[epg] Loaded ${this.channels.length} channels from cache (${Object.keys(this.tunerChannels).length} tuners)`);
       }
-      if (fs.existsSync(EPG_CACHE)) {
-        const data = JSON.parse(fs.readFileSync(EPG_CACHE, 'utf8'));
-        this.schedules = data.schedules || {};
-        this.lastFetch = data.lastFetch;
-        console.log(`[epg] Loaded EPG cache from ${new Date(this.lastFetch).toISOString()}`);
+      if (fs.existsSync(EPG_META)) {
+        const meta = JSON.parse(fs.readFileSync(EPG_META, 'utf8'));
+        this.lastFetch = meta.lastFetch;
+        const scheduleCount = this.getScheduleChannelIds().length;
+        console.log(`[epg] Loaded EPG meta from ${new Date(this.lastFetch).toISOString()} (${scheduleCount} channel schedules on disk)`);
       }
     } catch (err) {
       console.error('[epg] Error loading cache:', err.message);
     }
   }
 
+  // Save channels cache and EPG metadata (NOT schedules — those are saved per-channel)
   saveCache() {
     try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-      }
+      this.ensureDirectories();
       fs.writeFileSync(CHANNELS_CACHE, JSON.stringify({
         channels: this.channels,
         tunerChannels: this.tunerChannels,
         tunerMapping: this.tunerMapping
       }));
-      fs.writeFileSync(EPG_CACHE, JSON.stringify({ schedules: this.schedules, lastFetch: this.lastFetch }));
+      fs.writeFileSync(EPG_META, JSON.stringify({ lastFetch: this.lastFetch }));
       console.log('[epg] Cache saved');
     } catch (err) {
       console.error('[epg] Error saving cache:', err.message);
     }
   }
 
+  // --- Per-channel schedule file I/O ---
+
+  // Get list of channel IDs that have schedule files on disk
+  getScheduleChannelIds() {
+    try {
+      if (!fs.existsSync(SCHEDULES_DIR)) return [];
+      return fs.readdirSync(SCHEDULES_DIR)
+        .filter(f => f.endsWith('.json'))
+        .map(f => f.replace('.json', ''));
+    } catch (err) {
+      return [];
+    }
+  }
+
+  // Load a single channel's schedule from disk
+  loadChannelSchedule(channelId) {
+    try {
+      const filePath = path.join(SCHEDULES_DIR, `${safeFilename(channelId)}.json`);
+      if (!fs.existsSync(filePath)) return [];
+      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    } catch (err) {
+      console.error(`[epg] Error loading schedule for ${channelId}:`, err.message);
+      return [];
+    }
+  }
+
+  // Save a single channel's schedule to disk
+  saveChannelSchedule(channelId, entries) {
+    try {
+      this.ensureDirectories();
+      const filePath = path.join(SCHEDULES_DIR, `${safeFilename(channelId)}.json`);
+      if (!entries || entries.length === 0) {
+        // Delete empty files
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      } else {
+        fs.writeFileSync(filePath, JSON.stringify(entries));
+      }
+    } catch (err) {
+      console.error(`[epg] Error saving schedule for ${channelId}:`, err.message);
+    }
+  }
+
+  // Flush in-memory schedules to per-channel files and clear memory
+  flushSchedulesToDisk() {
+    let count = 0;
+    for (const [channelId, entries] of Object.entries(this.schedules)) {
+      this.saveChannelSchedule(channelId, entries);
+      count++;
+    }
+    this.schedules = {}; // Free memory
+    console.log(`[epg] Flushed ${count} channel schedules to disk`);
+  }
+
   // Prune expired schedule entries (keep 4h buffer for catch-up)
+  // Processes one channel at a time from disk to avoid loading all into memory
   pruneExpiredSchedules() {
     const cutoff = Date.now() - (4 * 60 * 60 * 1000);
     let pruned = 0;
-    for (const channelId of Object.keys(this.schedules)) {
-      const before = this.schedules[channelId].length;
-      this.schedules[channelId] = this.schedules[channelId].filter(
-        s => new Date(s.endTime).getTime() > cutoff
-      );
-      pruned += before - this.schedules[channelId].length;
-      if (this.schedules[channelId].length === 0) {
-        delete this.schedules[channelId];
-      }
+    const channelIds = this.getScheduleChannelIds();
+
+    for (const channelId of channelIds) {
+      const entries = this.loadChannelSchedule(channelId);
+      const before = entries.length;
+      const filtered = entries.filter(s => new Date(s.endTime).getTime() > cutoff);
+      pruned += before - filtered.length;
+      this.saveChannelSchedule(channelId, filtered);
     }
     if (pruned > 0) console.log(`[epg] Pruned ${pruned} expired schedule entries`);
   }
@@ -228,7 +356,7 @@ class DirectvEpg {
   async fetchFromBrowser(options = {}) {
     if (this.isRefreshing) {
       console.log('[epg] Refresh already in progress, skipping');
-      return { channels: this.channels.length, schedules: Object.keys(this.schedules).length };
+      return { channels: this.channels.length, schedules: this.getScheduleChannelIds().length };
     }
 
     // Check if any tuner is actively being used (unless bypassed)
@@ -251,6 +379,16 @@ class DirectvEpg {
     this.tunerChannels = {};
     this.tunerMapping = {};
     const allChannelsById = new Map(); // Deduplicate by ID (not number - some channels share numbers)
+
+    // Temporary in-memory schedules buffer for the fetch.
+    // We pre-load existing schedules from disk so we can deduplicate.
+    this.schedules = {};
+
+    // Pre-load existing schedules from disk for deduplication
+    const existingChannelIds = this.getScheduleChannelIds();
+    for (const channelId of existingChannelIds) {
+      this.schedules[channelId] = this.loadChannelSchedule(channelId);
+    }
 
     try {
       // Scan each tuner
@@ -303,12 +441,15 @@ class DirectvEpg {
       console.log('[epg] Tuner mapping:', tunerCounts);
 
       this.lastFetch = Date.now();
+
+      // Flush schedules from memory to per-channel files, then save metadata
+      this.flushSchedulesToDisk();
       this.saveCache();
 
       this.isRefreshing = false;
       return {
         channels: this.channels.length,
-        schedules: Object.keys(this.schedules).length,
+        schedules: this.getScheduleChannelIds().length,
         tunerChannels: Object.fromEntries(
           Object.entries(this.tunerChannels).map(([k, v]) => [k, v.length])
         )
@@ -316,6 +457,7 @@ class DirectvEpg {
 
     } catch (err) {
       this.isRefreshing = false;
+      this.schedules = {}; // Free memory on error too
       throw err;
     }
   }
@@ -439,7 +581,7 @@ class DirectvEpg {
         }
       }
 
-      // Process schedules (merge into main schedules)
+      // Process schedules (merge into in-memory schedules buffer with deduplication)
       if (apiResponses.schedules) {
         for (const schedule of apiResponses.schedules) {
           const channelId = schedule.channelId;
@@ -509,6 +651,7 @@ class DirectvEpg {
   }
 
   // Generate XMLTV format EPG
+  // Loads each channel's schedule lazily from disk to avoid holding all in memory
   generateXMLTV(hoursAhead = 24) {
     const now = new Date();
     const endTime = new Date(now.getTime() + hoursAhead * 60 * 60 * 1000);
@@ -533,9 +676,9 @@ class DirectvEpg {
       xml += `  </channel>\n`;
     }
 
-    // Add programs
+    // Add programs — load each channel's schedule from disk one at a time
     for (const channel of this.channels) {
-      const programs = this.schedules[channel.id] || [];
+      const programs = this.loadChannelSchedule(channel.id);
       const tvgId = `dtv-${channel.id}`;
 
       for (const program of programs) {
@@ -728,7 +871,7 @@ class DirectvEpg {
   getStatus() {
     return {
       channelCount: this.channels.length,
-      scheduledChannels: Object.keys(this.schedules).length,
+      scheduledChannels: this.getScheduleChannelIds().length,
       lastFetch: this.lastFetch,
       cacheAge: this.lastFetch ? Math.round((Date.now() - this.lastFetch) / 1000) : null,
       tunerChannelCounts: Object.fromEntries(
