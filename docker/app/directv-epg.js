@@ -87,55 +87,20 @@ class DirectvEpg {
     }
   }
 
-  // Migrate from legacy monolithic directv_epg.json to per-channel files
+  // Migrate from legacy monolithic directv_epg.json
+  // Cannot parse the old file (it may be too large and cause OOM), so just delete it.
+  // Schedule data will be re-fetched on the next auto-refresh.
   migrateFromLegacy() {
     try {
       if (!fs.existsSync(LEGACY_EPG_CACHE)) return;
 
-      console.log('[epg] Migrating from legacy monolithic EPG cache...');
-
-      // Read the legacy file in a streaming fashion by reading raw text
-      // and processing it — but since we must migrate, we parse it once
-      const raw = fs.readFileSync(LEGACY_EPG_CACHE, 'utf8');
-
-      // Try to parse — if it fails, the file is corrupt, just delete it
-      let data;
-      try {
-        data = JSON.parse(raw);
-      } catch (parseErr) {
-        console.error('[epg] Legacy cache corrupt, deleting:', parseErr.message);
-        fs.unlinkSync(LEGACY_EPG_CACHE);
-        return;
-      }
-
-      // Write meta
-      if (data.lastFetch) {
-        fs.writeFileSync(EPG_META, JSON.stringify({ lastFetch: data.lastFetch }));
-      }
-
-      // Write per-channel schedule files
-      if (data.schedules) {
-        let count = 0;
-        for (const [channelId, entries] of Object.entries(data.schedules)) {
-          if (entries && entries.length > 0) {
-            const filePath = path.join(SCHEDULES_DIR, `${safeFilename(channelId)}.json`);
-            fs.writeFileSync(filePath, JSON.stringify(entries));
-            count++;
-          }
-        }
-        console.log(`[epg] Migrated ${count} channel schedules to per-channel files`);
-      }
-
-      // Delete the legacy file
+      console.log('[epg] Found legacy monolithic EPG cache — deleting (too large to parse safely)');
+      console.log('[epg] Schedule data will be re-fetched on next EPG refresh');
       fs.unlinkSync(LEGACY_EPG_CACHE);
-      console.log('[epg] Legacy EPG cache deleted');
-
-      // Free the parsed data
-      data = null;
-
+      // Reset lastFetch so auto-refresh triggers immediately
+      this.lastFetch = null;
     } catch (err) {
       console.error('[epg] Migration error:', err.message);
-      // Don't block startup — just continue
     }
   }
 
@@ -380,15 +345,9 @@ class DirectvEpg {
     this.tunerMapping = {};
     const allChannelsById = new Map(); // Deduplicate by ID (not number - some channels share numbers)
 
-    // Temporary in-memory schedules buffer for the fetch.
-    // We pre-load existing schedules from disk so we can deduplicate.
+    // Temporary in-memory schedules buffer — loaded per-channel on demand
+    // during processing (NOT all at once) to keep memory low.
     this.schedules = {};
-
-    // Pre-load existing schedules from disk for deduplication
-    const existingChannelIds = this.getScheduleChannelIds();
-    for (const channelId of existingChannelIds) {
-      this.schedules[channelId] = this.loadChannelSchedule(channelId);
-    }
 
     try {
       // Scan each tuner
@@ -480,6 +439,8 @@ class DirectvEpg {
       page = await context.newPage();
 
       // Capture API responses
+      // Channels are stored; schedule data is processed immediately and discarded
+      // to avoid accumulating huge raw API responses in memory.
       const apiResponses = {};
 
       context.on('response', async (response) => {
@@ -495,10 +456,42 @@ class DirectvEpg {
                 apiResponses.channels = body;
               }
 
-              // Capture schedule  
+              // Process schedule data immediately — extract only the fields we need
+              // and merge into this.schedules with deduplication, then discard the raw body
               if (url.includes('/schedule') && body.schedules) {
-                if (!apiResponses.schedules) apiResponses.schedules = [];
-                apiResponses.schedules.push(...body.schedules);
+                for (const schedule of body.schedules) {
+                  const channelId = schedule.channelId;
+                  // Lazy-load this channel's existing schedule from disk if not yet in memory
+                  if (!this.schedules[channelId]) {
+                    this.schedules[channelId] = this.loadChannelSchedule(channelId);
+                  }
+                  for (const content of schedule.contents || []) {
+                    const consumable = content.consumables?.[0];
+                    if (consumable) {
+                      const title = content.title || content.displayTitle;
+                      const exists = this.schedules[channelId].some(s =>
+                        s.startTime === consumable.startTime && s.title === title
+                      );
+                      if (!exists) {
+                        this.schedules[channelId].push({
+                          title,
+                          subtitle: content.episodeTitle || null,
+                          description: content.description || '',
+                          startTime: consumable.startTime,
+                          endTime: consumable.endTime,
+                          duration: consumable.duration,
+                          categories: content.categories || [],
+                          genres: content.genres || [],
+                          rating: consumable.parentalRating || content.parentalRating,
+                          seasonNumber: content.seasonNumber,
+                          episodeNumber: content.episodeNumber,
+                          originalAirDate: content.originalAirDate,
+                          year: content.releaseYear
+                        });
+                      }
+                    }
+                  }
+                }
               }
             }
           } catch (e) {
@@ -581,42 +574,8 @@ class DirectvEpg {
         }
       }
 
-      // Process schedules (merge into in-memory schedules buffer with deduplication)
-      if (apiResponses.schedules) {
-        for (const schedule of apiResponses.schedules) {
-          const channelId = schedule.channelId;
-          if (!this.schedules[channelId]) {
-            this.schedules[channelId] = [];
-          }
-
-          for (const content of schedule.contents || []) {
-            const consumable = content.consumables?.[0];
-            if (consumable) {
-              // Check if this schedule entry already exists
-              const exists = this.schedules[channelId].some(s =>
-                s.startTime === consumable.startTime && s.title === (content.title || content.displayTitle)
-              );
-              if (!exists) {
-                this.schedules[channelId].push({
-                  title: content.title || content.displayTitle,
-                  subtitle: content.episodeTitle || null,
-                  description: content.description || '',
-                  startTime: consumable.startTime,
-                  endTime: consumable.endTime,
-                  duration: consumable.duration,
-                  categories: content.categories || [],
-                  genres: content.genres || [],
-                  rating: consumable.parentalRating || content.parentalRating,
-                  seasonNumber: content.seasonNumber,
-                  episodeNumber: content.episodeNumber,
-                  originalAirDate: content.originalAirDate,
-                  year: content.releaseYear
-                });
-              }
-            }
-          }
-        }
-      }
+      // Schedules were already processed incrementally in the response handler above
+      // (no post-processing needed — data is already in this.schedules)
 
       return channels;
 
